@@ -10,16 +10,28 @@ import qualified Control.Monad.State.Strict  as State
 import           Data.Fix                    (Fix (..), foldFixM)
 import           Data.List                   (delete, find)
 import           Data.Text                   (Text)
-import           Language.Cimple             (IdentityActions, Lexeme (..),
-                                              Node, NodeF (..), UnaryOp (..),
-                                              defaultActions, doNode,
-                                              lexemeText, traverseAst)
+import           Language.Cimple             (AssignOp (..), IdentityActions,
+                                              Lexeme (..), Node, NodeF (..),
+                                              UnaryOp (..), defaultActions,
+                                              doNode, lexemeText, traverseAst)
 import           Language.Cimple.Diagnostics (Diagnostics, warn)
 
 
 data ReadKind
-    = Alone
+    = Bare
+      -- Variable reference that may be a write if it's the lhs of an
+      -- assignment.
+    | Pure
+      -- Pure read, i.e. if it's on the lhs of an assignment, the variable
+      -- itself is not assigned, but e.g. is dereferenced and the pointee
+      -- is assigned a new value.
+    deriving (Show, Eq)
+
+data Scope
+    = Sibling
+      -- The action is performed in the same scope as the current action.
     | Nested
+      -- The action is performed in a nested scope.
     deriving (Show, Eq)
 
 data Action
@@ -29,20 +41,20 @@ data Action
     | WriteThenRead
     deriving (Show, Eq)
 
-data Var = Var Action (Lexeme Text)
+data Var = Var Action (Lexeme Text) Scope
   deriving (Show, Eq)
 
 lookupVar :: Var -> [Var] -> Maybe Var
 lookupVar = find . sameName
   where
-    sameName (Var _ (L _ _ n1)) (Var _ (L _ _ n2)) = n1 == n2
+    sameName (Var _ (L _ _ n1) _) (Var _ (L _ _ n2) _) = n1 == n2
 
 combine :: [Var] -> [Var] -> [Var]
-combine = foldr $ \var2@(Var act2 _) ls ->
+combine = foldr $ \var2@(Var act2 _ _) ls ->
     case lookupVar var2 ls of
-        Nothing                          -> var2 : ls
-        Just (Var act1 _) | act1 == act2 -> ls
-        Just var1                        -> var2 : delete var1 ls
+        Nothing                            -> var2 : ls
+        Just (Var act1 _ _) | act1 == act2 -> ls
+        Just var1                          -> var2 : delete var1 ls
 
 combineBranches :: [Var] -> [Var] -> [Var]
 combineBranches ls1 ls2 = foldr join [] (ls1 ++ ls2)
@@ -55,11 +67,11 @@ combineBranches ls1 ls2 = foldr join [] (ls1 ++ ls2)
                 let joined = joinVar var1 var2 in
                 joined ++ delete var2 ls
 
-    joinVar var1@(Var act1 _) (Var act2 _) | act1 == act2 = [var1]
-    joinVar var1@(Var Read{} _) (Var Read{} _) = [var1]
+    joinVar var1@(Var act1 _ _) (Var act2 _ _) | act1 == act2 = [var1]
+    joinVar var1@(Var Read{} _ _) (Var Read{} _ _) = [var1]
 
-    joinVar var1@(Var Read{} _) (Var Write _) = [var1]
-    joinVar (Var Write _) var2@(Var Read{} _) = [var2]
+    joinVar var1@(Var Read{} _ _) (Var Write _ _) = [var1]
+    joinVar (Var Write _ _) var2@(Var Read{} _ _) = [var2]
 
     joinVar var1 var2 = error ("combineBranches" <> show (var1, var2))
 
@@ -74,21 +86,29 @@ combineStatements file ls1 ls2 = foldM join [] (ls1 ++ ls2)
                 joined <- joinVar var1 var2
                 return $ joined ++ delete var2 ls
 
-    joinVar var1@(Var Read{} _) (Var Read{} _)        = return [var1]
-    joinVar var1@(Var Read{} _) (Var Write _)         = return [var1]
-    joinVar var1@(Var Read{} _) (Var WriteThenRead _) = return [var1]
-    joinVar var1@(Var Write _)  (Var Write _)         = return [var1]
-    joinVar (Var Write l1) (Var Read{} _)             = return [Var WriteThenRead l1]
-    joinVar (Var Write l1) (Var WriteThenRead _)      = return [Var WriteThenRead l1]
-    joinVar var1@(Var WriteThenRead _) _              = return [var1]
+    joinVar var1@(Var Write l1 Sibling) (Var WriteThenRead _ Sibling) = do
+        warn file l1 $ "value assigned to `" <> lexemeText l1 <> "' is never read"
+        return [var1]
 
-    joinVar (Var Declare l1) (Var Write l2) = do
+    joinVar var1@(Var Write l1 Sibling) (Var Write _ Sibling) = do
+        warn file l1 $ "value assigned to `" <> lexemeText l1 <> "' is never read"
+        return [var1]
+
+    joinVar var1@(Var Read{} _ _) (Var Read{} _ _)        = return [var1]
+    joinVar var1@(Var Read{} _ _) (Var Write _ _)         = return [var1]
+    joinVar var1@(Var Read{} _ _) (Var WriteThenRead _ _) = return [var1]
+    joinVar var1@(Var Write _ _)  (Var Write _ _)         = return [var1]
+    joinVar (Var Write l1 s) (Var Read{} _ _)             = return [Var WriteThenRead l1 s]
+    joinVar (Var Write l1 s) (Var WriteThenRead _ _)      = return [Var WriteThenRead l1 s]
+    joinVar var1@(Var WriteThenRead _ _) _                = return [var1]
+
+    joinVar (Var Declare l1 _) (Var Write l2 _) = do
         warn file l1 $ "variable `" <> lexemeText l1 <> "' can be reduced in scope"
         warn file l2 "  possibly to here"
         return []
 
-    joinVar (Var Declare _) _ = return []
-    joinVar var1@(Var _ l1) (Var Declare l2) = do
+    joinVar (Var Declare _ _) _ = return []
+    joinVar var1@(Var _ l1 _) (Var Declare l2 _) = do
         warn file l1 $ "variable `" <> lexemeText l1 <> "' used before its declaration"
         warn file l2 $ "  `" <> lexemeText l2 <> "' was declared here"
         return [var1]
@@ -101,19 +121,19 @@ checkScopes file = \case
     IfStmt c t Nothing          -> return $ t ++ c
     IfStmt c t (Just e)         -> return $ combineBranches t e ++ c
 
-    VarDecl t var a             -> return $ Var Declare var : foldr combine t a
+    VarDecl t var a             -> return $ Var Declare var Sibling : foldr combine t a
 
-    VarExpr var                 -> return [Var (Read Alone) var]
-    AssignExpr lhs _ []         -> return $ map readToWrite lhs
+    VarExpr var                 -> return [Var (Read Bare) var Sibling]
+    AssignExpr lhs AopEq []     -> return $ map readToWrite lhs
     BinaryExpr lhs _ rhs        -> return $ combine lhs rhs
     UnaryExpr UopIncr expr      -> return $ map writeToRead expr
     UnaryExpr UopDecr expr      -> return $ map writeToRead expr
     FunctionCall f args         -> return $ foldr combine [] (f : args)
 
-    UnaryExpr UopDeref e        -> return $ map readToNested e
-    MemberAccess e _            -> return $ map readToNested e
-    PointerAccess e _           -> return $ map readToNested e
-    ArrayAccess e i             -> return $ map readToNested (e ++ i)
+    UnaryExpr UopDeref e        -> return $ map readToPure e
+    MemberAccess e _            -> return $ map readToPure e
+    PointerAccess e _           -> return $ map readToPure e
+    ArrayAccess e i             -> return $ map readToPure (e ++ i)
 
     PreprocIf _ t e             -> checkCompoundStmt $ e : t
     PreprocIfdef _ t e          -> checkCompoundStmt $ e : t
@@ -124,20 +144,22 @@ checkScopes file = \case
 
   where
     checkCompoundStmt =
-        fmap (map wtrToWrite) . foldM (combineStatements file) [] . reverse
+        fmap (map $ toNested . wtrToWrite) . foldM (combineStatements file) [] . reverse
 
-    wtrToWrite (Var WriteThenRead var) = Var Write var
-    wtrToWrite var                     = var
+    toNested (Var mode var _) = Var mode var Nested
 
-    readToNested (Var (Read Alone) var) = Var (Read Nested) var
-    readToNested var                    = var
+    wtrToWrite (Var WriteThenRead var scope) = Var Write var scope
+    wtrToWrite var                           = var
 
-    readToWrite (Var (Read Alone) var) = Var Write var
-    readToWrite var                    = var
+    readToPure (Var (Read Bare) var scope) = Var (Read Pure) var scope
+    readToPure var                         = var
 
-    writeToRead (Var Write var)         = Var (Read Alone) var
-    writeToRead (Var WriteThenRead var) = Var (Read Alone) var
-    writeToRead var                     = var
+    readToWrite (Var (Read Bare) var scope) = Var Write var scope
+    readToWrite var                         = var
+
+    writeToRead (Var Write var scope)         = Var (Read Bare) var scope
+    writeToRead (Var WriteThenRead var scope) = Var (Read Bare) var scope
+    writeToRead var                           = var
 
 
 linter :: IdentityActions (State [Text]) Text
