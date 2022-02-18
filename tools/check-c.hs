@@ -1,5 +1,6 @@
 module Main (main) where
 
+import           Control.Arrow                   (first)
 import           Control.Monad                   (forM_, unless)
 import qualified Control.Monad.Parallel          as Par
 import           Data.List                       (isPrefixOf, partition)
@@ -38,38 +39,58 @@ checkBoolConversion expr = do
           recordError $ typeMismatch ("implicit conversion from " <> show (pretty ty) <> " to bool") annot annot
 
 
-checkConversion :: (Annotated node, MonadTrav m) => (node NodeInfo, Type) -> (node NodeInfo, Type) -> m ()
-checkConversion (l, lTy) (r, rTy) =
-    case (show $ pretty lTy, show $ pretty rTy) of
-      ("const char *","const int *")  -> return ()
-      ("vpx_codec_er_flags_t", "int") -> return ()
-      ("bool", "int")                 -> return ()
-      ("void *", _)                   -> return ()
-      ("uint64_t","enum RTPFlags")    -> return ()
+checkConversion :: MonadTrav m => (NodeInfo, Type) -> (CExpr, Type) -> m ()
+checkConversion (_, PtrType{}) _  = return ()
+checkConversion (_, lTy) (_, rTy) | typeEq lTy rTy = return ()
+checkConversion _ (CConst{}, _)   = return ()
+checkConversion _ (CCast{}, _)    = return ()
+checkConversion (l, lTy) (r, rTy) = case types of
+    -- These are ok.
+    ("vpx_codec_er_flags_t", "int") -> ok
+    ("bool", "int")                 -> ok
+    ("bool const", "int")           -> ok
+    ("socklen_t", "int")            -> ok
+    ("uint64_t","enum RTPFlags")    -> ok
 
-      -- TODO(iphydf): Look into these.
-      ("uint8_t", _)                  -> return ()
-      ("uint16_t", _)                 -> return ()
-      ("uint32_t", _)                 -> return ()
-      ("size_t", _)                   -> return ()
-      ("unsigned int", _)             -> return ()
-      ("int", _)                      -> return ()
-      ("long", _)                     -> return ()
-      (lTyName, rTyName) ->
-          recordError $ typeMismatch ("invalid conversion from `" <> rTyName <> "` to `" <> lTyName <> "` in assignment")
-              (annotation l, lTy)
-              (annotation r, rTy)
+    -- These are explicitly bad.
+    ("const int", "_Bool")          -> bad
+    ("int", "_Bool")                -> bad
+
+    -- TODO(iphydf): Look into these.
+    ("int8_t const", _)             -> ok
+    ("uint8_t", _)                  -> ok
+    ("uint8_t const", _)            -> ok
+    ("uint16_t", _)                 -> ok
+    ("uint16_t const", _)           -> ok
+    ("uint32_t", _)                 -> ok
+    ("uint32_t const", _)           -> ok
+    ("uint64_t", _)                 -> ok
+    ("size_t", _)                   -> ok
+    ("size_t const", _)             -> ok
+    ("unsigned int", _)             -> ok
+    ("const unsigned int", _)       -> ok
+    ("int", _)                      -> ok
+    ("const int", _)                -> ok
+    ("long", _)                     -> ok
+    ("const long", _)               -> ok
+    _                               -> bad
+
+  where
+    types@(lTyName, rTyName) = (show $ pretty lTy, show $ pretty rTy)
+    ok = return ()
+    bad = recordError $ typeMismatch
+        ("invalid conversion from `"
+            <> rTyName <> "` to `" <> lTyName
+            <> "` in assignment")
+        (l, lTy)
+        (annotation r, rTy)
 
 checkAssign :: MonadTrav m => (CExpr, Type) -> (CExpr, Type) -> m ()
-checkAssign (_, PtrType{}) (_, ArrayType{}) = return ()
-checkAssign (_, lTy) (_, rTy)               | typeEq lTy rTy = return ()
-checkAssign _ (CConst{}, _)                 = return ()
-checkAssign _ (CCast{}, _)                  = return ()
-checkAssign l r                             = checkConversion l r
+checkAssign l r = checkConversion (first annotation l) r
 
 checkFunc :: MonadTrav m => String -> IdentDecl -> m ()
-checkFunc sysInclude (FunctionDef (FunDef _ stmt info))
-  | sysInclude `isPrefixOf` posFile (posOf info) = return ()
+checkFunc sysInclude (FunctionDef (FunDef _ stmt node))
+  | sysInclude `isPrefixOf` posFile (posOf node) = return ()
   | otherwise = checkStmt stmt
 checkFunc _ _ = return ()
 
@@ -183,6 +204,19 @@ checkTypes :: MonadTrav m => String -> GlobalDecls -> m ()
 checkTypes sysInclude = mapM_ (checkFunc sysInclude) . Map.elems . gObjs
 
 
+checkVarDecl :: MonadTrav m => NodeInfo -> Type -> CExpr -> m ()
+checkVarDecl node ty expr = do
+    exprTy <- tExpr [] RValue expr
+    checkConversion (node, ty) (expr, exprTy)
+
+
+handleDeclEvent :: MonadTrav m => String -> DeclEvent -> m ()
+handleDeclEvent sysInclude (LocalEvent (ObjectDef (ObjDef (VarDecl (VarName (Ident _ _ node) _) _ ty) (Just (CInitExpr expr _)) _)))
+  | sysInclude `isPrefixOf` posFile (posOf node) = return ()
+  | otherwise = checkVarDecl node ty expr
+handleDeclEvent _ _ = return ()
+
+
 defaultCppOpts :: String -> [String]
 defaultCppOpts sysInclude =
     [ "-nostdinc"
@@ -205,7 +239,7 @@ processFile sysInclude lang cppOpts file = do
   where
     body tu = do
         modifyOptions (\opts -> opts { language = lang })
-        decls <- analyseAST tu
+        decls <- withExtDeclHandler (analyseAST tu) (handleDeclEvent sysInclude)
         checkTypes sysInclude decls
         return ()
 
