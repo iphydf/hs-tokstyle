@@ -9,7 +9,22 @@ import           Tokstyle.LinterSpec (mustParse)
 
 spec :: Spec
 spec = do
-    it "should give diagnostics on vars that can be reduced in scope" $ do
+    it "detects vars declared outside an if-statement that could be declared inside it" $ do
+        ast <- mustParse
+            [ "int a(void) {"
+            , "  int foo = 0;"
+            , "  if (true) {"
+            , "    print_int(foo);"
+            , "  }"
+            , "}"
+            ]
+        analyse ["var-unused-in-scope"] ("test.c", ast)
+            `shouldBe`
+            [ "test.c:2: variable `foo` can be reduced in scope [-Wvar-unused-in-scope]"
+            , "test.c:4:   possibly to here [-Wvar-unused-in-scope]"
+            ]
+
+    it "detects decls that can be for-init-decls" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "  int i;"
@@ -37,7 +52,7 @@ spec = do
             , "test.c:4:   possibly to here [-Wvar-unused-in-scope]"
             ]
 
-    it "should support #if/#else/#endif" $ do
+    it "supports #if/#else/#endif" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "#if HAHA"
@@ -51,13 +66,45 @@ spec = do
             ]
         analyse allWarnings ("test.c", ast)
             `shouldBe`
-            [ "test.c:6: variable `i` can be reduced in scope [-Wvar-unused-in-scope]"
-            , "test.c:7:   possibly to here [-Wvar-unused-in-scope]"
-            , "test.c:3: variable `i` can be reduced in scope [-Wvar-unused-in-scope]"
+            [ "test.c:3: variable `i` can be reduced in scope [-Wvar-unused-in-scope]"
             , "test.c:4:   possibly to here [-Wvar-unused-in-scope]"
             ]
 
-    it "should detect multiple uses, as long as all of them are writes" $ do
+    it "detects when the first #if branch is ok while the second isn't" $ do
+        ast <- mustParse
+            [ "int a(void) {"
+            , "#if HAHA"
+            , "  for (int i = 0; i < 10; ++i) { puts(\"hello!\"); }"
+            , "#else"
+            , "  int i;"
+            , "  for (i = 0; i < 10; ++i) { puts(\"hello!\"); }"
+            , "#endif"
+            , "}"
+            ]
+        analyse allWarnings ("test.c", ast)
+            `shouldBe`
+            [ "test.c:5: variable `i` can be reduced in scope [-Wvar-unused-in-scope]"
+            , "test.c:6:   possibly to here [-Wvar-unused-in-scope]"
+            ]
+
+    it "detects when the second #if branch is ok while the first isn't" $ do
+        ast <- mustParse
+            [ "int a(void) {"
+            , "#if HAHA"
+            , "  int i;"
+            , "  for (i = 0; i < 10; ++i) { puts(\"hello!\"); }"
+            , "#else"
+            , "  for (int i = 0; i < 10; ++i) { puts(\"hello!\"); }"
+            , "#endif"
+            , "}"
+            ]
+        analyse allWarnings ("test.c", ast)
+            `shouldBe`
+            [ "test.c:3: variable `i` can be reduced in scope [-Wvar-unused-in-scope]"
+            , "test.c:4:   possibly to here [-Wvar-unused-in-scope]"
+            ]
+
+    it "detects multiple uses, as long as all of them are writes" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "  int i;"
@@ -104,7 +151,7 @@ spec = do
             , "test.c:4:   possibly to here [-Wvar-unused-in-scope]"
             ]
 
-    it "should not diagnose variables that are read in one of the branches" $ do
+    it "allows vars read in one of the if-branches" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "  int i;"
@@ -117,7 +164,7 @@ spec = do
             ]
         analyse allWarnings ("test.c", ast) `shouldBe` []
 
-    it "should not give diagnostics on vars read in the same scope" $ do
+    it "allows vars read in the same scope" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "  int i;"
@@ -127,7 +174,7 @@ spec = do
             ]
         analyse allWarnings ("test.c", ast) `shouldBe` []
 
-    it "should not give diagnostics on vars used as the bound for another for-loop" $ do
+    it "allows vars used as the bound for another for-loop" $ do
         ast <- mustParse
             [ "int a(void) {"
             , "  int i;"
@@ -137,11 +184,26 @@ spec = do
             ]
         analyse allWarnings ("test.c", ast) `shouldBe` []
 
-    it "should not give diagnostics on assignments on array index operations" $ do
+    it "treats array index assignments as reads" $ do
         ast <- mustParse
             [ "int a(char *p) {"
             , "  char *c = p;"
             , "  if (true) { c[0] = 'a'; }"
+            , "}"
+            ]
+        analyse allWarnings ("test.c", ast) `shouldBe` []
+
+    it "should consider one `if` branch with a write as possibly not writing" $ do
+        ast <- mustParse
+            [ "int main(void) {"
+            , "  int foo = 1;"
+            , "  for (int i = 0; i < 10; ++i) {"
+            , "    if (i >= 5) {"
+            , "      foo = 0;"
+            , "    }"
+            , "    printf(\"%d\\n\", foo);"
+            , "  }"
+            , "  return 0;"
             , "}"
             ]
         analyse allWarnings ("test.c", ast) `shouldBe` []

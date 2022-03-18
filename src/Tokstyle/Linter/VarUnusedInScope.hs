@@ -25,6 +25,7 @@ data ReadKind
 data Action
     = Declare
     | Write
+    | MaybeWrite
     | Read ReadKind
     | WriteThenRead
     deriving (Show, Eq)
@@ -59,6 +60,9 @@ combineBranches ls1 ls2 = foldr join [] (ls1 ++ ls2)
     joinVar var1@(Var Read{} _) (Var Read{} _) = [var1]
 
     joinVar var1@(Var Read{} _) (Var Write _) = [var1]
+    joinVar var1@(Var Read{} _) (Var MaybeWrite _) = [var1]
+    joinVar var1@(Var Write{} _) (Var MaybeWrite _) = [var1]
+    joinVar (Var MaybeWrite _) var2@(Var Read{} _) = [var2]
     joinVar (Var Write _) var2@(Var Read{} _) = [var2]
 
     joinVar var1 var2 = error ("combineBranches" <> show (var1, var2))
@@ -74,13 +78,19 @@ combineStatements file ls1 ls2 = foldM join [] (ls1 ++ ls2)
                 joined <- joinVar var1 var2
                 return $ joined ++ delete var2 ls
 
-    joinVar var1@(Var Read{} _) (Var Read{} _)        = return [var1]
-    joinVar var1@(Var Read{} _) (Var Write _)         = return [var1]
-    joinVar var1@(Var Read{} _) (Var WriteThenRead _) = return [var1]
-    joinVar var1@(Var Write _)  (Var Write _)         = return [var1]
-    joinVar (Var Write l1) (Var Read{} _)             = return [Var WriteThenRead l1]
-    joinVar (Var Write l1) (Var WriteThenRead _)      = return [Var WriteThenRead l1]
-    joinVar var1@(Var WriteThenRead _) _              = return [var1]
+    joinVar var1@(Var Read{} _) (Var Read{} _)            = return [var1]
+    joinVar var1@(Var Read{} _) (Var Write _)             = return [var1]
+    joinVar var1@(Var Read{} _) (Var MaybeWrite _)        = return [var1]
+    joinVar var1@(Var Read{} _) (Var WriteThenRead _)     = return [var1]
+    joinVar var1@(Var Write _)  (Var Write _)             = return [var1]
+    joinVar var1@(Var Write _)  (Var MaybeWrite _)        = return [var1]
+    joinVar (Var MaybeWrite _)  var2@(Var Write _)        = return [var2]
+    joinVar (Var Write l1) (Var Read{} _)                 = return [Var WriteThenRead l1]
+    joinVar (Var MaybeWrite _) var2@(Var Read{} _)        = return [var2]
+    joinVar (Var Write l1) (Var WriteThenRead _)          = return [Var WriteThenRead l1]
+    joinVar var1@(Var WriteThenRead _) _                  = return [var1]
+    joinVar (Var MaybeWrite _) var2@(Var WriteThenRead _) = return [var2]
+    joinVar var1@(Var MaybeWrite _) (Var MaybeWrite _)    = return [var1]
 
     joinVar (Var Declare l1) (Var Write l2) = do
         warn file l1 $ "variable `" <> lexemeText l1 <> "` can be reduced in scope"
@@ -98,7 +108,7 @@ checkScopes :: FilePath -> NodeF (Lexeme Text) [Var] -> Diagnostics [Var]
 checkScopes file = \case
     CompoundStmt ls             -> checkCompoundStmt ls
     ForStmt decl cont incr body -> return $ foldr combine [] [body, incr, cont, decl]
-    IfStmt c t Nothing          -> return $ t ++ c
+    IfStmt c t Nothing          -> return $ map writeToMaybeWrite t ++ c
     IfStmt c t (Just e)         -> return $ combineBranches t e ++ c
 
     VarDecl t var a             -> return $ Var Declare var : foldr combine t a
@@ -138,6 +148,10 @@ checkScopes file = \case
     writeToRead (Var Write var)         = Var (Read Alone) var
     writeToRead (Var WriteThenRead var) = Var (Read Alone) var
     writeToRead var                     = var
+
+    writeToMaybeWrite (Var Write var)         = Var MaybeWrite var
+    writeToMaybeWrite (Var WriteThenRead var) = Var MaybeWrite var
+    writeToMaybeWrite var                     = var
 
 
 linter :: AstActions (State [Text]) Text
