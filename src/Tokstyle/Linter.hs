@@ -30,6 +30,7 @@ import qualified Tokstyle.Linter.FuncPrototypes    as FuncPrototypes
 import qualified Tokstyle.Linter.FuncScopes        as FuncScopes
 import qualified Tokstyle.Linter.GlobalFuncs       as GlobalFuncs
 import qualified Tokstyle.Linter.LargeStructParams as LargeStructParams
+import qualified Tokstyle.Linter.LinearTypes       as LinearTypes
 import qualified Tokstyle.Linter.LoggerCalls       as LoggerCalls
 import qualified Tokstyle.Linter.LoggerConst       as LoggerConst
 import qualified Tokstyle.Linter.LoggerNoEscapes   as LoggerNoEscapes
@@ -81,6 +82,7 @@ localLinters =
     , FuncScopes.descr
     , GlobalFuncs.descr
     , LargeStructParams.descr
+    , LinearTypes.descr
     , LoggerCalls.descr
     , LoggerConst.descr
     , LoggerNoEscapes.descr
