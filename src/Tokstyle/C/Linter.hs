@@ -52,6 +52,7 @@ import qualified Tokstyle.C.Linter.CallbackDiscipline as CallbackDiscipline (des
 import qualified Tokstyle.C.Linter.CallbackParams     as CallbackParams (descr)
 import qualified Tokstyle.C.Linter.Cast               as Cast (descr)
 import qualified Tokstyle.C.Linter.Conversion         as Conversion (descr)
+import qualified Tokstyle.C.Linter.Memcpy             as Memcpy (descr)
 import qualified Tokstyle.C.Linter.Memset             as Memset (descr)
 import qualified Tokstyle.C.Linter.SizeArg            as SizeArg (descr)
 import qualified Tokstyle.C.Linter.Sizeof             as Sizeof (descr)
@@ -70,6 +71,7 @@ linters =
     , CallbackParams.descr
     , Cast.descr
     , Conversion.descr
+    , Memcpy.descr
     , Memset.descr
     , SizeArg.descr
     , Sizeof.descr

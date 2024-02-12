@@ -1,6 +1,6 @@
 # C-based linters (`check-c`)
 
-There are currently 12 linters implemented.
+There are currently 13 linters implemented.
 
 ## `-Wbool-conversion`
 
@@ -40,6 +40,10 @@ Checks for disallowed casts between incompatible types.
 ## `-Wconversion`
 
 Checks for disallowed implicit conversions.
+
+## `-Wmemcpy`
+
+Checks compatibility of dst and src in memcpy/memcmp.
 
 ## `-Wmemset`
 
