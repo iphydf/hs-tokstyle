@@ -36,15 +36,15 @@ import           Debug.Trace                      (trace, traceM)
 import qualified Language.Cimple                  as C
 import           Language.Cimple.TraverseAst      (AstActions (..), astActions,
                                                    traverseAst)
-import           Tokstyle.Analysis.DataFlow       (CFGNode (..), DataFlow (..),
+import           Language.Cimple.Analysis.DataFlow       (CFGNode (..), DataFlow (..),
                                                    buildCFG, fixpoint, join,
                                                    transfer)
 import           Tokstyle.Analysis.PointsTo       (evalExpr,
                                                    extractRelevantState)
 import           Tokstyle.Analysis.PointsTo.Types
-import           Tokstyle.Analysis.Scope          (ScopedId (..))
+import           Language.Cimple.Analysis.Scope          (ScopedId (..))
 import           Tokstyle.Common.TypeSystem       (TypeDescr (..), lookupType)
-import           Tokstyle.Worklist                (Worklist, fromList, pop,
+import           Language.Cimple.Analysis.Worklist                (Worklist, fromList, pop,
                                                    push, pushList)
 
 debugging :: Bool
@@ -86,8 +86,8 @@ runGlobalFixpoint ctx ast =
         tracedInitialFacts = dtrace ("initialGlobalFacts: " ++ show initialGlobalFacts) initialGlobalFacts
 
         -- Precompute static function properties
-        precomputedVarTypes = Map.map (findVarTypes . head) funcMap
-        precomputedParams = Map.map (getParams . head) funcMap
+        precomputedVarTypes = Map.map (\case (f:_) -> findVarTypes f; [] -> Map.empty) funcMap
+        precomputedParams = Map.map (\case (f:_) -> getParams f; [] -> []) funcMap
 
         (initialWorklist, poolAfterRIS) = runState (do
             list <- forM initialFunctions $ \funcId -> do

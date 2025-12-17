@@ -147,7 +147,10 @@ linter = astActions
             castTy <- tExpr [] RValue cast
             exprTy <- tExpr [] RValue e
             ctx <- Env.getCtx
-            unless (head ctx `elem` exemptions) $
+            let currentCtx = case ctx of
+                    (c:_) -> c
+                    []    -> ""
+            unless (currentCtx `elem` exemptions) $
                 checkCast castTy exprTy e
             act
 

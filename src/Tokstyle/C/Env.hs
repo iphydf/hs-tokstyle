@@ -33,7 +33,7 @@ pushCtx :: String -> Trav Env ()
 pushCtx s = modifyUserState $ \env@Env{ctx} -> env{ctx = s:ctx}
 
 popCtx :: Trav Env ()
-popCtx = modifyUserState $ \env@Env{ctx} -> env{ctx = tail ctx}
+popCtx = modifyUserState $ \env@Env{ctx} -> env{ctx = drop 1 ctx}
 
 
 getRetTy :: Trav Env Type

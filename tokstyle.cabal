@@ -18,14 +18,10 @@ source-repository head
 library
   default-language: Haskell2010
   exposed-modules:
-    Tokstyle.Analysis.CFG
-    Tokstyle.Analysis.DataFlow
     Tokstyle.Analysis.PointsTo
     Tokstyle.Analysis.PointsTo.ExternalSummaries
     Tokstyle.Analysis.PointsTo.Fixpoint
     Tokstyle.Analysis.PointsTo.Types
-    Tokstyle.Analysis.Scope
-    Tokstyle.Analysis.Types
     Tokstyle.Analysis.VTable
     Tokstyle.C.Env
     Tokstyle.C.Linter
@@ -63,6 +59,7 @@ library
     Tokstyle.Linter.FuncPrototypes
     Tokstyle.Linter.FuncScopes
     Tokstyle.Linter.GlobalFuncs
+    Tokstyle.Linter.LinearTypes
     Tokstyle.Linter.LoggerCalls
     Tokstyle.Linter.LoggerConst
     Tokstyle.Linter.LoggerNoEscapes
@@ -85,7 +82,6 @@ library
     Tokstyle.SemFmt.EnumToString
     Tokstyle.SemFmt.EnumUnpack
     Tokstyle.SemFmt.StructPack
-    Tokstyle.Worklist
 
   ghc-options:      -Wall
   hs-source-dirs:   src
@@ -162,9 +158,7 @@ test-suite testsuite
   hs-source-dirs:     test
   main-is:            testsuite.hs
   other-modules:
-    Tokstyle.Analysis.DataFlowSpec
     Tokstyle.Analysis.PointsToSpec
-    Tokstyle.Analysis.ScopeSpec
     Tokstyle.Analysis.VTableSpec
     Tokstyle.C.Linter.BoolConversionSpec
     Tokstyle.C.Linter.CallbackParamsSpec

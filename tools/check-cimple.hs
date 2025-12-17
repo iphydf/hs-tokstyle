@@ -51,6 +51,7 @@ defaultFlags =
     [ "-Wno-callback-names"
     , "-Wno-nullability"
     , "-Wno-ownership-decls"
+    , "-Wno-ownership-inference"
     , "-Wno-points-to"
     , "-Wno-points-to-asserts"
     , "-Wno-type-check"

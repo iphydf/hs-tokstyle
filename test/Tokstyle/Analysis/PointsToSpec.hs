@@ -22,7 +22,7 @@ import qualified Language.Cimple                     as C
 import           Language.Cimple.TraverseAst
 import           Test.Hspec                          (Spec, describe, it,
                                                       shouldBe)
-import           Tokstyle.Analysis.DataFlow          (CFGNode (..), buildCFG,
+import           Language.Cimple.Analysis.DataFlow          (CFGNode (..), buildCFG,
                                                       fixpoint, join)
 import           Tokstyle.Analysis.PointsTo.Fixpoint (findEntryPointsAndFuncMap,
                                                       runGlobalFixpoint)
@@ -34,7 +34,7 @@ import           Tokstyle.Analysis.PointsTo.Types    (GlobalEnv (..),
                                                       PointsToFact (..),
                                                       RelevantInputState (..),
                                                       intern)
-import           Tokstyle.Analysis.Scope             (ScopedId (..),
+import           Language.Cimple.Analysis.Scope             (ScopedId (..),
                                                       runScopePass)
 import           Tokstyle.Analysis.VTable            (resolveVTables)
 import           Tokstyle.Common.TypeSystem          (collect)
@@ -73,7 +73,9 @@ runPointsToAnalysis code = do
     when (length entryPoints /= 1) $
         error $ "Expected 1 entry point for the test, but found " ++ show (length entryPoints) ++ " (" ++ show (map sidName entryPoints) ++ ")"
 
-    let entryPointId = head entryPoints
+    let entryPointId = case entryPoints of
+            (ep:_) -> ep
+            []     -> error "No entry points found"
 
     let dummyId = ScopedId 0 "" C.Global
     let ctx = PointsToContext "test.c" typeSystem vtableMap (GlobalEnv Map.empty) funcMap dummyId Map.empty :: PointsToContext ScopedId
@@ -85,10 +87,15 @@ runPointsToAnalysis code = do
     let entryPointKeys = filter (\(fid, _) -> fid == entryPointId) (Map.keys cfgCache)
     when (null entryPointKeys) $ error "Entry point not found in cache"
     -- Assuming only one analysis context for the entry point in these simple tests.
-    let (_, entryPointRIS) = head entryPointKeys
+    let (_, entryPointRIS) = case entryPointKeys of
+            (k:_) -> k
+            []    -> error "Entry point keys not found"
     let (cfgs, _) = fromMaybe (error "CFGs for entry point not found in cache") (Map.lookup (entryPointId, entryPointRIS) cfgCache)
     -- Merge exit facts from all CFGs for this entry point (e.g. if there were #ifdefs)
-    let (finalFact, _) = runState (foldM (join ctx) (cfgOutFacts $ last (Map.elems (head cfgs))) (map (\cfg -> cfgOutFacts $ last (Map.elems cfg)) (tail cfgs))) pool
+    let (finalFact, _) = runState (case cfgs of
+            (c:cs) -> foldM (join ctx) (cfgOutFacts $ last (Map.elems c)) (map (\cfg -> cfgOutFacts $ last (Map.elems cfg)) cs)
+            []     -> error "Empty CFG list"
+            ) pool
     return (scopedAst, finalFact, pool)
 
 findSid :: Text -> [C.Node (C.Lexeme ScopedId)] -> ScopedId

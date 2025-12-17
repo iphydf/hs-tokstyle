@@ -94,8 +94,9 @@ hspec_test(
     ],
 )
 
-filegroup(
+cc_library(
     name = "headers",
-    srcs = glob(["include/**/*.h"]),
+    hdrs = glob(["include/**/*.h"]),
+    includes = ["include"],
     visibility = ["//visibility:public"],
 )

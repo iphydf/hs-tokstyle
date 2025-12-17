@@ -19,13 +19,13 @@ import qualified Data.Text                           as Text
 import qualified Language.Cimple                     as C
 import qualified Language.Cimple.Diagnostics         as Diagnostics
 import           Language.Cimple.TraverseAst
-import           Tokstyle.Analysis.DataFlow          (CFGNode (..), buildCFG,
+import           Language.Cimple.Analysis.DataFlow          (CFGNode (..), buildCFG,
                                                       fixpoint, transfer)
 import           Tokstyle.Analysis.PointsTo          (evalExpr)
 import           Tokstyle.Analysis.PointsTo.Fixpoint (findEntryPointsAndFuncMap,
                                                       runGlobalFixpoint)
 import           Tokstyle.Analysis.PointsTo.Types
-import           Tokstyle.Analysis.Scope             (ScopedId (..),
+import           Language.Cimple.Analysis.Scope             (ScopedId (..),
                                                       runScopePass)
 import           Tokstyle.Analysis.VTable            (resolveVTables)
 import           Tokstyle.Common.TypeSystem          (collect)
@@ -41,7 +41,9 @@ analyse sources =
         (_, funcMap) = findEntryPointsAndFuncMap scopedAsts
 
         -- 2. Run global points-to analysis
-        filePath = fst (head sources)
+        filePath = case sources of
+            ((fp, _):_) -> fp
+            []          -> ""
         dummyId = ScopedId 0 "" C.Global
         ctx = PointsToContext filePath typeSystem vtableMap (GlobalEnv Map.empty) funcMap dummyId Map.empty
         (gEnv, _, cfgCache, pool) = runGlobalFixpoint ctx scopedAsts

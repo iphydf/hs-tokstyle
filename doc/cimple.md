@@ -1,6 +1,6 @@
 # Cimple-based linters (`check-cimple`)
 
-There are currently 39 linters implemented, out of which 13 perform global analyses.
+There are currently 41 linters implemented, out of which 15 perform global analyses.
 In the list below, the global ones are marked specially.
 
 ## `-Wassert`
@@ -243,6 +243,12 @@ not declared in a .h file we can include. This means we're depending on an
 unexported implementation detail, and there is no compiler that can check
 whether our declaration matches the implementation's definition.
 
+## `-Wlinear-types` (global)
+
+Check for Rust-like linear types (ownership and borrowing).
+This linter is incremental: any function that uses `owned` qualifiers,
+and any function called by such a function, is fully checked.
+
 ## `-Wlogger-calls`
 
 Checks that the format argument in LOGGER calls is a string literal.
@@ -340,6 +346,12 @@ not definitions, unless it's a static definition without prior declaration.
 **Reason:** keeping qualifiers on declarations only reduces clutter in the
 implementation and ensures that the interface is the single source of truth
 for ownership or nullability information.
+
+## `-Wownership-inference` (global)
+
+Identify functions that appear to follow linear ownership patterns
+but are not yet marked with 'owner' qualifiers. This suggests
+candidates for easy conversion to linear types.
 
 ## `-Wparens`
 

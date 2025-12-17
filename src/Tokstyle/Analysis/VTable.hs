@@ -16,7 +16,7 @@ import qualified Language.Cimple             as C
 import           Language.Cimple.Pretty      (showNodePlain)
 import           Language.Cimple.TraverseAst (AstActions (..), astActions,
                                               traverseAst)
-import           Tokstyle.Analysis.Scope     (ScopedId (..))
+import           Language.Cimple.Analysis.Scope     (ScopedId (..))
 import           Tokstyle.Common.TypeSystem  (TypeDescr (..), TypeInfo (..),
                                               TypeRef (..), TypeSystem,
                                               lookupType)

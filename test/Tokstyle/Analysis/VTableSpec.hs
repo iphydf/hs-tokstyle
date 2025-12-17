@@ -7,7 +7,7 @@ import           Data.Maybe                 (fromMaybe)
 import           Data.Text                  (Text)
 import qualified Language.Cimple            as C
 import           Test.Hspec                 (Spec, describe, it, shouldBe)
-import           Tokstyle.Analysis.Scope    (ScopeState (..), ScopedId (..),
+import           Language.Cimple.Analysis.Scope    (ScopeState (..), ScopedId (..),
                                              runScopePass)
 import           Tokstyle.Analysis.VTable   (VTableMap, resolveVTables)
 import           Tokstyle.Common.TypeSystem (collect)

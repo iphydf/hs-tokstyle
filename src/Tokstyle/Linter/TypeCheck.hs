@@ -265,7 +265,7 @@ instantiate (Forall vars t) = do
 cimpleToType :: Node (Lexeme Text) -> LinterM Type
 cimpleToType (Fix node) = case node of
     C.TyStd (L _ _ "void")   -> return TUnit
-    C.TyStd (L _ _ "float")  -> return TFloat
+    C.TyStd (L _ _ "float")  -> return TInt
     C.TyStd (L _ _ "int")    -> return TInt
     C.TyStd (L _ _ "long")   -> return TInt
     C.TyStd (L _ _ "long int") -> return TInt
@@ -352,15 +352,15 @@ inferExpr n@(Fix node) = case node of
             unify e "initialiser list element" elemType t
         return $ TPointer elemType
     C.CommentExpr e _ -> inferExpr e
-    C.CompoundExpr _ _ -> fresh
     C.MacroParam l@(L _ _ name) -> do
         mScheme <- gets (Map.lookup name . typeEnv)
         case mScheme of
             Just scheme -> instantiate scheme
             Nothing     -> addError l ("Unbound macro parameter: " <> name) >> fresh
     C.LiteralExpr C.Int (L _ _ txt)
-        | "." `Text.isInfixOf` txt -> return TFloat
+        | "." `Text.isInfixOf` txt -> return TInt
         | otherwise -> return TInt
+    C.LiteralExpr C.Float _    -> return TInt
     C.LiteralExpr C.Bool _     -> return TBool
     C.LiteralExpr C.Char _     -> return TChar
     C.LiteralExpr C.String _   -> return $ TPointer TChar

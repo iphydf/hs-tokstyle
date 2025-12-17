@@ -15,7 +15,7 @@ import           Data.Text                        (Text, pack)
 import           Language.Cimple                  (AlexPosn (..), NodeF (..))
 import qualified Language.Cimple                  as C
 import           Tokstyle.Analysis.PointsTo.Types
-import           Tokstyle.Analysis.Scope          (ScopedId (..))
+import           Language.Cimple.Analysis.Scope          (ScopedId (..))
 
 -- A summary of an external function's behavior.
 -- It takes the arguments and the current state, and returns the new state

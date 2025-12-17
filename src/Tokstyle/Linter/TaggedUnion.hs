@@ -107,7 +107,9 @@ isCompatible :: TypeSystem -> [(Lexeme Text, TypeInfo)] -> Bool
 isCompatible ts members =
     case mapMaybe (typeSize ts . snd) members of
         sizes | length sizes == length members && not (null sizes) ->
-            all (== head sizes) sizes
+            case sizes of
+                (s:_) -> all (== s) sizes
+                []    -> error "isCompatible: sizes list is empty despite check"
         _ -> False
 
 

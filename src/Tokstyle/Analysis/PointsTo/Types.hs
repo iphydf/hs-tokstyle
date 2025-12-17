@@ -27,7 +27,7 @@ import           Data.Set                   (Set)
 import           Data.Text                  (Text)
 import           GHC.Generics               (Generic)
 import qualified Language.Cimple            as C
-import           Tokstyle.Analysis.Scope    (ScopedId)
+import           Language.Cimple.Analysis.Scope    (ScopedId)
 import           Tokstyle.Analysis.VTable   (VTableMap)
 import           Tokstyle.Common.TypeSystem (TypeSystem)
 

@@ -20,13 +20,13 @@ import qualified Data.Text                           as Text
 import qualified Debug.Trace                         as Debug
 import qualified Language.Cimple                     as C
 import qualified Language.Cimple.Diagnostics         as Diagnostics
-import           Tokstyle.Analysis.DataFlow          (CFGNode (..), transfer)
+import           Language.Cimple.Analysis.DataFlow          (CFGNode (..), transfer)
 import           Tokstyle.Analysis.PointsTo          (evalExpr)
 import           Tokstyle.Analysis.PointsTo.Fixpoint (findEntryPointsAndFuncMap,
                                                       findVarTypes,
                                                       runGlobalFixpoint)
 import           Tokstyle.Analysis.PointsTo.Types
-import           Tokstyle.Analysis.Scope             (ScopedId (..),
+import           Language.Cimple.Analysis.Scope             (ScopedId (..),
                                                       runScopePass)
 import           Tokstyle.Analysis.VTable            (resolveVTables)
 import           Tokstyle.Common.TypeSystem          (collect)
@@ -46,7 +46,9 @@ analyse sources =
         vtableMap = resolveVTables scopedAsts typeSystem
         (_, funcMap) = findEntryPointsAndFuncMap scopedAsts
 
-        filePath = fst (head sources)
+        filePath = case sources of
+            ((fp, _):_) -> fp
+            []          -> ""
         dummyId = ScopedId 0 "" C.Global
         ctx = PointsToContext filePath typeSystem vtableMap (GlobalEnv Map.empty) funcMap dummyId Map.empty
         (gEnv, _, cfgCache, pool) = runGlobalFixpoint ctx scopedAsts
@@ -57,7 +59,9 @@ analyse sources =
         lintFunction (funcId, relevantState) =
             case Map.lookup (funcId, relevantState) cfgCache of
                 Just (cfgs, _) ->
-                    let funcDef = head (fromMaybe [] (Map.lookup funcId funcMap))
+                    let funcDef = case fromMaybe [] (Map.lookup funcId funcMap) of
+                            (def:_) -> def
+                            []      -> error $ "Function definition not found for " ++ show funcId
                         varTypes = findVarTypes funcDef
                         lintCtx = ctx { pcGlobalEnv = gEnv, pcCurrentFunc = funcId, pcVarTypes = varTypes }
                     in concatMap (\cfg -> concatMap (checkNode lintCtx pool) (Map.elems cfg)) cfgs
@@ -174,10 +178,11 @@ descr = (analyse, ("points-to-asserts", Text.unlines
     , "verified at compile time by the points-to analysis."
     , ""
     , "Supported checks:"
-    , "  - `mem_is_heap(p)`: asserts that `p` points to a heap location."
-    , "  - `mem_is_stack(p)`: asserts that `p` points to a stack location."
-    , "  - `mem_is_not_null(p)`: asserts that `p` is not null."
-    , "  - `mem_is_external_param(p)`: asserts that `p` points to an external parameter."
+    , ""
+    , "- `mem_is_heap(p)`: asserts that `p` points to a heap location."
+    , "- `mem_is_stack(p)`: asserts that `p` points to a stack location."
+    , "- `mem_is_not_null(p)`: asserts that `p` is not null."
+    , "- `mem_is_external_param(p)`: asserts that `p` points to an external parameter."
     , ""
     , "Checks can be combined with `&&` and `||`, and negated with `!`."
     , "For example: `assert(!(mem_is_heap(p) || mem_is_stack(p)))`"

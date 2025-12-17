@@ -208,8 +208,8 @@ collectTypes node = case node of
     LiteralExpr ConstId name     -> return [NameLit name]
     LiteralExpr Int lit          -> return [IntLit lit]
 
-    DeclSpecArray Nothing        -> return []
-    DeclSpecArray (Just arr)     -> return [Array Nothing arr]
+    DeclSpecArray _ Nothing      -> return []
+    DeclSpecArray _ (Just arr)   -> return [Array Nothing arr]
     CallbackDecl ty name         -> return [Var name (TypeRef FuncRef ty)]
     VarDecl ty name []           -> return $ map (Var name) ty
     VarDecl ty name arrs         -> return $ map (foldArray name arrs) ty

@@ -34,11 +34,11 @@ import qualified Language.Cimple                              as C
 import           Language.Cimple.TraverseAst                  (AstActions (..),
                                                                astActions,
                                                                traverseAst)
-import           Tokstyle.Analysis.DataFlow
+import           Language.Cimple.Analysis.DataFlow
 import           Tokstyle.Analysis.PointsTo.ExternalSummaries (getExternalSummary,
                                                                locFromPos)
 import           Tokstyle.Analysis.PointsTo.Types
-import           Tokstyle.Analysis.Scope                      (ScopedId (..))
+import           Language.Cimple.Analysis.Scope                      (ScopedId (..))
 import           Tokstyle.Analysis.VTable                     (VTableMap)
 import           Tokstyle.Common.TypeSystem                   (TypeDescr (..),
                                                                TypeSystem,
@@ -269,7 +269,9 @@ evalExpr facts ctx nodeId (Fix (C.FunctionCall calleeExpr args)) = do
                         case Map.lookup sid funcMap of
                             Just _ -> do -- Internal function
                                 let calleeFuncs = fromMaybe (error $ "Function AST not found for: " ++ show sid) (Map.lookup sid funcMap)
-                                let calleeFunc = head calleeFuncs
+                                let calleeFunc = case calleeFuncs of
+                                        (f:_) -> f
+                                        []    -> error $ "No definition found for function: " ++ show sid
                                 let params = getParams calleeFunc
                                 argLocs <- mapM (evalExpr facts ctx nodeId) args
                                 let initialVarMap = Map.fromList $ zip params argLocs
@@ -433,7 +435,9 @@ handleFunctionCall ctx funcId nodeId facts calleeExpr args = do
                             Just _ -> do -- Internal function, proceed with context-sensitive analysis
                                 let GlobalEnv gEnv = pcGlobalEnv ctx
                                 let calleeFuncs = fromMaybe (error $ "Function AST not found for: " ++ show sid) (Map.lookup sid funcMap)
-                                let calleeFunc = head calleeFuncs -- Assume first def is representative
+                                let calleeFunc = case calleeFuncs of
+                                        (f:_) -> f
+                                        []    -> error $ "No definition found for function: " ++ show sid -- Assume first def is representative
                                 let params = getParams calleeFunc
                                 argLocs <- mapM (evalExpr facts ctx nodeId) args
                                 let initialVarMap = Map.fromList $ zip params argLocs
@@ -503,7 +507,9 @@ handleFunctionCall ctx funcId nodeId facts calleeExpr args = do
     let resultEdges = map (snd . fst) unpackedResults
     let resultRetLocs = map snd unpackedResults
 
-    finalFacts <- if null resultFacts then return facts else foldM (join ctx) (head resultFacts) (tail resultFacts)
+    finalFacts <- case resultFacts of
+        [] -> return facts
+        (f:fs) -> foldM (join ctx) f fs
     let finalEdges = Set.unions resultEdges
     let retLocs = IntSet.unions resultRetLocs
     return (finalFacts, finalEdges, retLocs)
