@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE MultiWayIf            #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE StrictData            #-}
 
 module Tokstyle.Linter.TypeCheck (descr) where
 

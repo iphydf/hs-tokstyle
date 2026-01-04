@@ -29,7 +29,6 @@ import qualified Tokstyle.Linter.EnumNames        as EnumNames
 import qualified Tokstyle.Linter.FuncPrototypes   as FuncPrototypes
 import qualified Tokstyle.Linter.FuncScopes       as FuncScopes
 import qualified Tokstyle.Linter.GlobalFuncs      as GlobalFuncs
-import qualified Tokstyle.Linter.LinearTypes      as LinearTypes
 import qualified Tokstyle.Linter.LoggerCalls      as LoggerCalls
 import qualified Tokstyle.Linter.LoggerConst      as LoggerConst
 import qualified Tokstyle.Linter.LoggerNoEscapes  as LoggerNoEscapes
@@ -39,7 +38,6 @@ import qualified Tokstyle.Linter.MemcpyStructs    as MemcpyStructs
 import qualified Tokstyle.Linter.Nesting          as Nesting
 import qualified Tokstyle.Linter.Nullability      as Nullability
 import qualified Tokstyle.Linter.OwnershipDecls   as OwnershipDecls
-import qualified Tokstyle.Linter.OwnershipInference as OwnershipInference
 import qualified Tokstyle.Linter.Parens           as Parens
 import qualified Tokstyle.Linter.SwitchIf         as SwitchIf
 import qualified Tokstyle.Linter.TaggedUnion      as TaggedUnion
@@ -51,8 +49,6 @@ import qualified Tokstyle.Linter.Callgraph        as Callgraph
 import qualified Tokstyle.Linter.DeclaredOnce     as DeclaredOnce
 import qualified Tokstyle.Linter.DeclsHaveDefns   as DeclsHaveDefns
 import qualified Tokstyle.Linter.DocComments      as DocComments
-import qualified Tokstyle.Linter.PointsTo         as PointsTo
-import qualified Tokstyle.Linter.PointsToAsserts  as PointsToAsserts
 import qualified Tokstyle.Linter.TypeCheck        as TypeCheck
 import qualified Tokstyle.SemFmt.EnumFromInt      as EnumFromInt
 import qualified Tokstyle.SemFmt.EnumToString     as EnumToString
@@ -108,11 +104,7 @@ globalLinters =
     , DeclaredOnce.descr
     , DeclsHaveDefns.descr
     , DocComments.descr
-    , LinearTypes.descr
     , OwnershipDecls.descr
-    , OwnershipInference.descr
-    , PointsTo.descr
-    , PointsToAsserts.descr
     , TypeCheck.descr
     , TaggedUnion.descr
     -- Semantic formatters:
