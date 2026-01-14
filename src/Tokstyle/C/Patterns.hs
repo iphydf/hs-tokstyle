@@ -23,6 +23,7 @@ pattern TY_char_arr             <- ArrayType (DirectType (TyIntegral TyChar) _ _
 pattern TY_char_ptr             <- PtrType (DirectType (TyIntegral TyChar) _ _) _ _
 pattern TY_struct name          <- DirectType (TyComp (CompTypeRef (NamedRef (Ident name _ _)) _ _)) _ _
 pattern TY_struct_ptr name      <- PtrType (TY_struct name) _ _
+pattern TY_nullptr              <- TY_typedef "nullptr_t"
 pattern TY_sockaddr_storage_ptr <- TY_struct_ptr "sockaddr_storage"
 pattern TY_sockaddr_ptr         <- TY_struct_ptr "sockaddr"
 pattern TY_sockaddr_in_ptr      <- TY_struct_ptr "sockaddr_in"

@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-{-# LANGUAGE ViewPatterns      #-}
 module Tokstyle.C.Linter.Conversion (analyse) where
 
 import           Data.Functor.Identity           (Identity)
@@ -41,56 +40,73 @@ checkConversion :: (Annotated node, MonadTrav m) => String -> (CExpr, Type) -> (
 -- TODO(iphydf): Maybe it shouldn't? UBSAN also warns about it.
 checkConversion _ (r, _) (_, _) | "cmp/cmp.c" `isSuffixOf` posFile (posOf (annotation r)) = return ()
 
-checkConversion _ (_, TY_void_ptr) (_, PtrType{}) = return ()
-checkConversion _ (_, ArrayType{}) (_, PtrType{}) = return ()
-checkConversion _ (_, rTy) (_, lTy)               | typeEq lTy rTy = return ()
-
--- Allow int to enum conversion to cover ternary operator "?:". Only actual
--- "int" is allowed, not "int32_t" or anything typedef'd. The latter would mean
--- assignment from something that didn't undergo implicit int conversions.
-checkConversion _ (_, rTy) (_, lTy) | isEnumConversion (canonicalType lTy) rTy = return ()
+checkConversion context (r, rTy') (l, lTy') =
+    if isAllowed then return () else recordError errorMsg
   where
+    rTy = removeQuals rTy'
+    lTy = removeQuals lTy'
+    rCanon = canonicalType rTy
+    lCanon = canonicalType lTy
+    rTyName = show $ pretty rTy
+    lTyName = show $ pretty lTy
+
+    errorMsg = typeMismatch
+        ("invalid conversion from `" <> rTyName <> "` to `" <>
+            lTyName <> "` in " <> context)
+        (annotation l, lTy)
+        (annotation r, rTy)
+
+    isAllowed =
+        isNullPtr rTy'
+        || typeEq lTy rTy
+        || sameType rCanon lCanon
+        || show (pretty rCanon) == show (pretty lCanon)
+        || case (rCanon, lCanon) of
+            (PtrType rPtd _ _, PtrType lPtd _ _) ->
+                typeEq lPtd rPtd || isVoidPtr lCanon
+            (ArrayType rPtd _ _ _, PtrType lPtd _ _) ->
+                typeEq lPtd rPtd || isVoidPtr lCanon
+            _ -> isEnumConversion lCanon rTy' || special
+
+    isNullPtr TY_nullptr = True
+    isNullPtr _          = False
+
     isEnumConversion (DirectType TyEnum{} _ _) (DirectType (TyIntegral TyInt) _ _) = True
     isEnumConversion _ _ = False
 
-checkConversion context (r, removeQuals -> rTy) (l, removeQuals -> lTy) =
-    case (show $ pretty rTy, show $ pretty lTy) of
-      (rTyName, lTyName) | rTyName == lTyName -> return ()
-      ("uint8_t [32]","uint8_t const [32]") -> return ()
-      ("char *","const char *")         -> return ()
-      ("const int *","const char *")    -> return ()
-      (_,"void *")                      -> return ()
-      (_,"const void *")                -> return ()
+    isVoidPtr TY_void_ptr = True
+    isVoidPtr _           = False
+
+    special = case (rTyName, lTyName) of
+      ("uint8_t [32]","uint8_t const [32]") -> True
+      ("const int *","const char *")        -> True
+      ("char *","const char *")             -> True
 
       -- int literals and integer promotions.
-      ("int",_)                         -> return ()
+      ("int",_) | not (isPtr lTy)           -> True
 
-      ("uint32_t","int64_t")            -> return ()
-      ("enum RTPFlags","uint64_t")      -> return ()
+      ("uint32_t","int64_t")                -> True
+      ("enum RTPFlags","uint64_t")          -> True
 
       -- TODO(iphydf): Almost definitely wrong (code should be fixed).
-      ("unsigned long long","uint16_t") -> return ()
-      ("unsigned int","uint16_t")       -> return ()
-      ("uint32_t","uint16_t")           -> return ()
-      ("uint8_t","int8_t")              -> return ()
+      ("unsigned long long","uint16_t")     -> True
+      ("unsigned int","uint16_t")           -> True
+      ("uint32_t","uint16_t")               -> True
+      ("uint8_t","int8_t")                  -> True
 
       -- TODO(iphydf): Look into these.
-      (_,"uint8_t")                     -> return ()
-      (_,"int32_t")                     -> return ()
-      (_,"uint32_t")                    -> return ()
-      (_,"size_t")                      -> return ()
-      (_,"unsigned int")                -> return ()
-      (_,"int")                         -> return ()
-      (_,"long")                        -> return ()
+      (_,"uint8_t")                         -> True
+      (_,"int32_t")                         -> True
+      (_,"uint32_t")                        -> True
+      (_,"size_t")                          -> True
+      (_,"unsigned int")                    -> True
+      (_,"int")                             -> True
+      (_,"long")                            -> True
+      _                                     -> False
 
-      -- TODO(iphydf): Remove once the "system" PR is in.
-      ("const struct Memory *","Memory const *") -> return ()
-      (rTyName, lTyName) ->
-          recordError $ typeMismatch
-              ("invalid conversion from `" <> rTyName <> "` to `" <>
-                  lTyName <> "` in " <> context)
-              (annotation l, lTy)
-              (annotation r, rTy)
+    isPtr PtrType{}   = True
+    isPtr ArrayType{} = True
+    isPtr _           = False
 
 checkAssign :: MonadTrav m => String -> (CExpr, Type) -> (CExpr, Type) -> m ()
 checkAssign _ _ (CConst{}, _) = return ()

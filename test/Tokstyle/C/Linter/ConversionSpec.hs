@@ -41,3 +41,61 @@ spec = describe "Conversion linter" $ do
                 , "}"
                 ]
             analyse allWarnings ast `shouldBe` []
+
+        it "allows Memory const * to const struct Memory * assignment" $ do
+            ast <- mustParse
+                [ "typedef struct Memory Memory;"
+                , "void func() {"
+                , "  const struct Memory *a;"
+                , "  Memory const *b;"
+                , "  a = b;"
+                , "}"
+                ]
+            analyse allWarnings ast `shouldBe` []
+
+        it "allows const struct Memory * to Memory const * assignment" $ do
+            ast <- mustParse
+                [ "typedef struct Memory Memory;"
+                , "void func() {"
+                , "  const struct Memory *a;"
+                , "  Memory const *b;"
+                , "  b = a;"
+                , "}"
+                ]
+            analyse allWarnings ast `shouldBe` []
+
+        it "allows int* to const int* assignment" $ do
+            ast <- mustParse
+                [ "void func() {"
+                , "  int *a = 0;"
+                , "  const int *b;"
+                , "  b = a;"
+                , "}"
+                ]
+            analyse allWarnings ast `shouldBe` []
+
+        it "allows nullptr assignment" $ do
+            ast <- mustParse
+                [ "typedef void *nullptr_t;"
+                , "extern nullptr_t nullptr;"
+                , "void func() {"
+                , "  int *a;"
+                , "  a = nullptr;"
+                , "}"
+                ]
+            analyse allWarnings ast `shouldBe` []
+
+        it "warns on int to pointer assignment" $ do
+            ast <- mustParse
+                [ "void func() {"
+                , "  int a = 0;"
+                , "  char *b;"
+                , "  b = a;"
+                , "}"
+                ]
+            analyse allWarnings ast `shouldBe`
+                [ Text.unlines
+                    [ "test.c:4: (column 3) [ERROR]  >>> Type mismatch"
+                    , "  invalid conversion from `int` to `char *` in assignment"
+                    ]
+                ]

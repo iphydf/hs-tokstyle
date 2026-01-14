@@ -25,6 +25,7 @@ defaultCppOpts sysInclude =
     , "-undef"              -- no __linux__
     , "-I" <> sysInclude
     , "-I" <> sysInclude <> "/opus"
+    , "-Wno-unused-command-line-argument"
     ]
 
 

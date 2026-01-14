@@ -7,7 +7,7 @@
 module Tokstyle.Linter.Callgraph (descr) where
 
 import           Control.Applicative         ((<|>))
-import           Control.Monad               (forM_, unless)
+import           Control.Monad               (forM_, unless, when)
 import qualified Control.Monad.State.Strict  as State
 import qualified Data.Array                  as Array
 import           Data.Fix                    (foldFix)
@@ -170,11 +170,16 @@ checkReferences cg =
             NKType    -> Just (Name NKTypedef f n)
             NKTypedef -> Just (Name NKType f n)
             NKVal     -> Nothing)
-    checkForward src dst =
+    checkForward src dst = do
         unless (any (`Map.member` cg) $ dests dst) $
             warn (nameFile dst) (nameLexeme dst) $ "definition of `" <> nameText src
                 <> "` references undefined global " <> nameKindStr dst
                 <> " `" <> nameText dst <> "`"
+
+        let isTestOnly name = "testonly" `Text.isInfixOf` nameText name
+        when (isTestOnly dst && not (isTestOnly src)) $
+            warn (nameFile src) (nameLexeme src) $ "non-testonly function `" <> nameText src
+                <> "` calls testonly function `" <> nameText dst <> "`"
 
 
 checkCycles :: Callgraph -> Diagnostics ()
@@ -226,7 +231,8 @@ checkUnused cg =
     isExemptFile _            = False
 
     isExempt name = or
-        [ "bin_pack_" `Text.isPrefixOf` name
+        [ "testonly" `Text.isInfixOf` name
+        , "bin_pack_" `Text.isPrefixOf` name
         , "bin_unpack_" `Text.isPrefixOf` name
         , "cmp_" `Text.isPrefixOf` name
         , "crypto_auth" `Text.isPrefixOf` name
@@ -452,19 +458,23 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "ERROR_BUFFER_OVERFLOW"
         , "NO_ERROR"
         , "WSAAddressToString"
+        , "WSAAddressToStringA"
         , "WSACleanup"
         , "WSAECONNRESET"
         , "WSAEINPROGRESS"
         , "WSAEWOULDBLOCK"
         , "WSAGetLastError"
+        , "WSASetLastError"
         , "WSAStartup"
         , "WSAStringToAddress"
+        , "WSAStringToAddressA"
 
         , "CLOCK_MONOTONIC"
         , "clock_get_time"
         , "clock_gettime"
         , nktype "timespec"
 
+        , "F_GETFL"
         , "F_SETFL"
         , "FD_SET"
         , "FD_ZERO"
