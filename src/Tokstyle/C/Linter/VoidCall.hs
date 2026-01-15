@@ -15,18 +15,19 @@ import           Language.C                      (Annotated (annotation),
                                                   CExpression (CCast, CVar),
                                                   CInitializer (CInitExpr),
                                                   CStatement (CCompound), Ident,
-                                                  NodeInfo, Pretty (pretty))
+                                                  NodeInfo)
+import qualified Language.C                      as C
 import           Language.C.Analysis.AstAnalysis (ExprSide (RValue), tExpr)
-import           Language.C.Analysis.SemError    (invalidAST)
 import           Language.C.Analysis.SemRep      (FunDef (..), FunType (..),
                                                   GlobalDecls, IdentDecl (..),
                                                   ParamDecl (..), Type (..),
                                                   VarDecl (..), VarName (..))
-import           Language.C.Analysis.TravMonad   (MonadCError (recordError),
-                                                  Trav, TravT)
+import           Language.C.Analysis.TravMonad   (Trav, TravT)
 import           Language.C.Data.Ident           (Ident (Ident))
+import           Prettyprinter                   (pretty)
 import           Tokstyle.C.Env                  (Env (params),
-                                                  bracketUserState)
+                                                  bracketUserState,
+                                                  recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
@@ -59,8 +60,8 @@ linter = astActions
             srcTy <- tExpr [] RValue e
             case srcTy of
                 TY_void_ptr ->
-                    recordError $ invalidAST (annotation node) $
-                        "first statement must cast `void *" <> idName n <> "` to `" <> show (pretty dstTy) <> "`"
+                    recordLinterError (annotation node) $
+                        "first statement must cast `void *" <> pretty (idName n) <> "` to `" <> pretty (show (C.pretty dstTy)) <> "`"
                 _ -> return ()
 
         _ -> act

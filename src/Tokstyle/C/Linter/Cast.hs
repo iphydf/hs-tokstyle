@@ -9,7 +9,6 @@ import           Language.C.Analysis.AstAnalysis (ExprSide (..), defaultMD,
                                                   tExpr)
 import           Language.C.Analysis.ConstEval   (constEval, intValue)
 import           Language.C.Analysis.DefTable    (lookupTag)
-import           Language.C.Analysis.SemError    (typeMismatch)
 import           Language.C.Analysis.SemRep      (EnumType (..),
                                                   EnumTypeRef (..),
                                                   Enumerator (..), GlobalDecls,
@@ -17,47 +16,45 @@ import           Language.C.Analysis.SemRep      (EnumType (..),
                                                   Type (..), TypeName (..),
                                                   TypeQuals (..), noTypeQuals)
 import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT,
-                                                  getDefTable, recordError,
-                                                  throwTravError)
+                                                  getDefTable, throwTravError)
 import           Language.C.Analysis.TypeUtils   (canonicalType, sameType)
 import           Language.C.Data.Error           (userErr)
 import           Language.C.Data.Ident           (Ident (..))
-import           Language.C.Pretty               (pretty)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CConstant (..), CExpr,
                                                   CExpression (..), annotation)
 import           Language.C.Syntax.Constants     (CInteger (..))
+import           Prettyprinter                   (pretty)
 import qualified Tokstyle.C.Env                  as Env
-import           Tokstyle.C.Env                  (Env)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
 import           Tokstyle.C.TravUtils            (getJust)
 
 
-sameEnum :: MonadTrav m => Type -> Type -> (Ident, CExpr) -> (Ident, CExpr) -> m ()
-sameEnum leftTy rightTy (leftId, leftExpr) (rightId, rightExpr) = do
+sameEnum :: Type -> Type -> (Ident, CExpr) -> (Ident, CExpr) -> TravT Env Identity ()
+sameEnum _ _ (leftId, leftExpr) (rightId, rightExpr) = do
     leftVal  <- getJust failMsg . intValue =<< constEval defaultMD Map.empty leftExpr
     rightVal <- getJust failMsg . intValue =<< constEval defaultMD Map.empty rightExpr
     unless (leftVal == rightVal) $
-        throwTravError $ typeMismatch
-            ("invalid cast: enumerator value for `"
-                <> show (pretty leftId) <> " = " <> show leftVal
+        recordLinterError (annotation leftExpr) $
+            "invalid cast: enumerator value for `"
+                <> pretty (show (C.pretty leftId)) <> " = " <> pretty leftVal
                 <> "` does not match `"
-                <> show (pretty rightId) <> " = " <> show rightVal <> "`")
-            (annotation leftExpr, leftTy)
-            (annotation rightExpr, rightTy)
+                <> pretty (show (C.pretty rightId)) <> " = " <> pretty rightVal <> "`"
   where
     failMsg = "invalid cast: could not determine enumerator values"
 
-checkEnumCast :: MonadTrav m => Type -> Type -> CExpr -> m ()
-checkEnumCast castTy exprTy _ = do
+checkEnumCast :: Type -> Type -> CExpr -> TravT Env Identity ()
+checkEnumCast castTy exprTy e = do
     castEnums <- enumerators (canonicalType castTy)
     exprEnums <- enumerators (canonicalType exprTy)
-    unless (length castEnums == length exprEnums) $
-        throwTravError $ userErr $
-            "enum types `" <> show (pretty castTy) <> "` and `"
-            <> show (pretty exprTy) <> "` have different a number of enumerators"
-    zipWithM_ (sameEnum castTy exprTy) castEnums exprEnums
+    if length castEnums /= length exprEnums
+    then recordLinterError (annotation e) $
+            "enum types `" <> pretty (show (C.pretty castTy)) <> "` and `"
+            <> pretty (show (C.pretty exprTy)) <> "` have different a number of enumerators"
+    else zipWithM_ (sameEnum castTy exprTy) castEnums exprEnums
 
 enumerators :: MonadTrav m => Type -> m [(Ident, CExpr)]
 enumerators (DirectType (TyEnum (EnumTypeRef name _)) _ _) = do
@@ -67,9 +64,9 @@ enumerators (DirectType (TyEnum (EnumTypeRef name _)) _ _) = do
           return $ map (\(Enumerator i e _ _) -> (i, e)) enums
       _ ->
         throwTravError $ userErr $
-            "couldn't find enum type `" <> show (pretty name) <> "`"
+            "couldn't find enum type `" <> show (C.pretty name) <> "`"
 enumerators ty =
-    throwTravError $ userErr $ "invalid enum type `" <> show (pretty ty) <> "`"
+    throwTravError $ userErr $ "invalid enum type `" <> show (C.pretty ty) <> "`"
 
 
 unqual :: Type -> Type
@@ -78,7 +75,7 @@ unqual (DirectType tn _ a)   = DirectType tn noTypeQuals a
 unqual (ArrayType ty sz _ a) = ArrayType (unqual ty) sz noTypeQuals a
 unqual ty                    = ty
 
-checkCast :: MonadTrav m => Type -> Type -> CExpr -> m ()
+checkCast :: Type -> Type -> CExpr -> TravT Env Identity ()
 checkCast castTy' exprTy' e
     | isCharOrUint8T castTy' && isCharOrUint8T exprTy' = return ()
     | otherwise = check (canonicalType castTy') (canonicalType exprTy')
@@ -127,9 +124,8 @@ checkCast castTy' exprTy' e
 
     -- Any other casts: NOT OK
     check _ _ =
-        let annot = (annotation e, castTy') in
-        recordError $ typeMismatch ("disallowed cast from " <>
-            show (pretty exprTy') <> " to " <> show (pretty castTy')) annot annot
+        recordLinterError (annotation e) $
+            "disallowed cast from " <> pretty (show (C.pretty exprTy')) <> " to " <> pretty (show (C.pretty castTy'))
 
     isNullPtr (CConst (CIntConst (CInteger 0 _ _) _)) = True
     isNullPtr _                                       = False

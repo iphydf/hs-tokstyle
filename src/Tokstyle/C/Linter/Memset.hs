@@ -6,21 +6,20 @@ import           Control.Monad                   (unless)
 import           Data.Functor.Identity           (Identity)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.DefTable    (lookupTag)
-import           Language.C.Analysis.SemError    (typeMismatch)
 import           Language.C.Analysis.SemRep      (CompType (..),
                                                   CompTypeRef (..), GlobalDecls,
                                                   MemberDecl (..), TagDef (..),
                                                   Type (..), TypeName (..),
                                                   VarDecl (..))
 import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT,
-                                                  getDefTable, recordError,
-                                                  throwTravError)
+                                                  getDefTable, throwTravError)
 import           Language.C.Analysis.TypeUtils   (canonicalType)
 import           Language.C.Data.Error           (userErr)
 import           Language.C.Data.Ident           (Ident (..))
-import           Language.C.Pretty               (pretty)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpression (..), annotation)
-import           Tokstyle.C.Env                  (Env)
+import           Prettyprinter                   (pretty)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
 
@@ -34,7 +33,7 @@ hasPtrs ty = case canonicalType ty of
                 and <$> mapM memberHasPtrs members
             _ ->
                 throwTravError $ userErr $
-                    "couldn't find struct/union type `" <> show (pretty name) <> "`"
+                    "couldn't find struct/union type `" <> show (C.pretty name) <> "`"
     PtrType{} -> return True
     _ -> return False
 
@@ -49,7 +48,7 @@ memsetAllowed ty = case canonicalType ty of
     ArrayType memTy _ _ _ -> not <$> hasPtrs memTy
     _ ->
         throwTravError $ userErr $
-            "value of type `" <> show (pretty ty) <> "` cannot be passed to memset"
+            "value of type `" <> show (C.pretty ty) <> "` cannot be passed to memset"
 
 
 linter :: AstActions (TravT Env Identity)
@@ -58,11 +57,10 @@ linter = astActions
         CCall (CVar (Ident "memset" _ _) _) [s, _, _] _ -> do
             ty <- tExpr [] RValue s
             allowed <- memsetAllowed ty
-            unless allowed $ do
-                let annot = (annotation s, ty)
-                recordError $ typeMismatch
-                    ("disallowed memset argument `" <> show (pretty s) <> "` of type `"
-                     <> show (pretty ty) <> "`, which contains pointers") annot annot
+            unless allowed $
+                recordLinterError (annotation s) $
+                    "disallowed memset argument `" <> pretty (show (C.pretty s)) <> "` of type `"
+                     <> pretty (show (C.pretty ty)) <> "`, which contains pointers"
             act
 
         _ -> act

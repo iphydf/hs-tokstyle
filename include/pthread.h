@@ -4,7 +4,7 @@ typedef struct pthread_mutexattr_t {
   char x;
 } pthread_mutexattr_t;
 
-typedef enum {
+typedef enum __pthread_mutex_type {
   PTHREAD_MUTEX_RECURSIVE,
 } __pthread_mutex_type;
 

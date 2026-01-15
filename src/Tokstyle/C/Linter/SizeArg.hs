@@ -9,24 +9,25 @@ import qualified Data.Map                        as Map
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), defaultMD,
                                                   tExpr)
 import           Language.C.Analysis.ConstEval   (constEval, intValue)
-import           Language.C.Analysis.SemError    (invalidAST, typeMismatch)
+import           Language.C.Analysis.SemError    (invalidAST)
 import           Language.C.Analysis.SemRep      (GlobalDecls, ParamDecl (..),
                                                   Type (..))
 import           Language.C.Analysis.TravMonad   (Trav, TravT, catchTravError,
-                                                  recordError, throwTravError)
+                                                  throwTravError)
 import           Language.C.Analysis.TypeUtils   (canonicalType)
 import           Language.C.Data.Ident           (Ident (..))
-import           Language.C.Pretty               (pretty)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpr, CExpression (..),
                                                   annotation)
-import           Tokstyle.C.Env                  (Env)
+import           Prettyprinter                   (pretty)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
 
 
 checkArraySizes :: Ident -> [(ParamDecl, CExpr, Type)] -> Trav Env ()
-checkArraySizes funId ((_, _, arrTy@(ArrayTypeSize arrSize)):(ParamName sizeParam, sizeArg, sizeTy):args)
+checkArraySizes funId ((_, _, arrTy@(ArrayTypeSize arrSize)):(ParamName sizeParam, sizeArg, _):args)
     | any (`List.isInfixOf` sizeParam) ["size", "len"] =
         -- Ignore any name lookup errors here. VLAs have locally defined
         -- array sizes, but we don't check VLAs.
@@ -35,12 +36,11 @@ checkArraySizes funId ((_, _, arrTy@(ArrayTypeSize arrSize)):(ParamName sizePara
             sizeArgVal <- intValue <$> constEval defaultMD Map.empty sizeArg
             case (arrSizeVal, sizeArgVal) of
                 (Just arrSizeConst, Just sizeArgConst) | arrSizeConst < sizeArgConst ->
-                    let annot = (annotation sizeArg, sizeTy) in
-                    recordError $ typeMismatch (
-                        "size parameter `" <> sizeParam <> "` is passed constant value `"
-                        <> show (pretty sizeArg) <> "` (= " <> show sizeArgConst <> "),\n"
-                        <> "  which is greater than the array size of `" <> show (pretty arrTy) <> "`,\n"
-                        <> "  potentially causing buffer overrun in `" <> show (pretty funId) <> "`") annot annot
+                    recordLinterError (annotation sizeArg) $
+                        "size parameter `" <> pretty sizeParam <> "` is passed constant value `"
+                        <> pretty (show (C.pretty sizeArg)) <> "` (= " <> pretty sizeArgConst <> "),\n"
+                        <> "  which is greater than the array size of `" <> pretty (show (C.pretty arrTy)) <> "`,\n"
+                        <> "  potentially causing buffer overrun in `" <> pretty (show (C.pretty funId)) <> "`"
                 _ -> return ()  -- not constant, or array size greater than size arg
             checkArraySizes funId args
         ) $ const $ return ()

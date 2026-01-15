@@ -21,12 +21,14 @@ library
     Tokstyle.C.Env
     Tokstyle.C.Linter
     Tokstyle.C.Linter.BoolConversion
+    Tokstyle.C.Linter.CallbackData
     Tokstyle.C.Linter.CallbackParams
     Tokstyle.C.Linter.Cast
     Tokstyle.C.Linter.Conversion
     Tokstyle.C.Linter.Memset
     Tokstyle.C.Linter.SizeArg
     Tokstyle.C.Linter.Sizeof
+    Tokstyle.C.Linter.StrictTypedef
     Tokstyle.C.Linter.VoidCall
     Tokstyle.C.Patterns
     Tokstyle.C.TravUtils
@@ -98,6 +100,7 @@ library
     , mtl             <3
     , parallel        <4
     , prettyprinter   >=1       && <2
+    , prettyprinter-ansi-terminal <1.2
     , text            <3
 
 executable check-cimple
@@ -122,6 +125,8 @@ executable check-c
       base            <5
     , language-c
     , monad-parallel  <0.9
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , tokstyle
     , text
 
@@ -151,12 +156,14 @@ test-suite testsuite
   main-is:            testsuite.hs
   other-modules:
     Tokstyle.C.Linter.BoolConversionSpec
+    Tokstyle.C.Linter.CallbackDataSpec
     Tokstyle.C.Linter.CallbackParamsSpec
     Tokstyle.C.Linter.CastSpec
     Tokstyle.C.Linter.ConversionSpec
     Tokstyle.C.Linter.MemsetSpec
     Tokstyle.C.Linter.SizeArgSpec
     Tokstyle.C.Linter.SizeofSpec
+    Tokstyle.C.Linter.StrictTypedefSpec
     Tokstyle.C.Linter.VoidCallSpec
     Tokstyle.C.LinterSpec
     Tokstyle.Linter.AssertSpec
@@ -210,5 +217,7 @@ test-suite testsuite
     , hspec     <3
     , language-c
     , mtl
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , text
     , tokstyle

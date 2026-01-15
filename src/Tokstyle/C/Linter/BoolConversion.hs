@@ -4,30 +4,30 @@ module Tokstyle.C.Linter.BoolConversion (analyse) where
 
 import           Data.Functor.Identity           (Identity)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
-import           Language.C.Analysis.SemError    (typeMismatch)
 import           Language.C.Analysis.SemRep      (GlobalDecls, IntType (..),
                                                   Type (..), TypeDefRef (..),
                                                   TypeName (..))
-import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT,
-                                                  recordError)
+import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT)
 import           Language.C.Data.Ident           (Ident (..))
-import           Language.C.Pretty               (pretty)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CBinaryOp (..), CExpr,
                                                   CExpression (..),
                                                   CUnaryOp (..), annotation)
-import           Tokstyle.C.Env                  (Env)
+import           Prettyprinter                   (pretty)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
+
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
 
-checkBoolConversion :: MonadTrav m => CExpr -> m ()
+checkBoolConversion :: CExpr -> TravT Env Identity ()
 checkBoolConversion expr = do
     ty <- tExpr [] RValue expr
     case ty of
         DirectType (TyIntegral _) _ _ -> return ()
         TypeDefType (TypeDefRef (Ident "bool" _ _) _ _) _ _ -> return ()
         PtrType _ _ _ ->
-            let annot = (annotation expr, ty) in
-            recordError $ typeMismatch ("implicit conversion from " <> show (pretty ty) <> " to bool") annot annot
+            recordLinterError (annotation expr) $
+                "implicit conversion from " <> pretty (show (C.pretty ty)) <> " to bool"
         _ -> return ()
 
 

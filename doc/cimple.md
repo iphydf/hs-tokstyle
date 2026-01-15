@@ -411,7 +411,7 @@ Explicitly forbids the use of some C functions considered unsafe:
 - `sprintf`, because it has no way of bounding the number of characters written.
   `snprintf` should be used, instead.
 - `strerror`, because it is not thread safe.
-  `strerror_r` or `net_new_strerror` should be used, instead.
+  `strerror_r` or `net_strerror` should be used, instead.
 - `strcat`, because it has no way of bounding the number of characters written.
   `snprintf` should be used, instead.
 - `strcpy`, because it has no way of bounding the number of characters written.

@@ -3,6 +3,7 @@
 #include "types.h"
 
 enum {
+  EINTR = 4,
   EBADF = 9,
   EAGAIN = 11,
   EWOULDBLOCK = EAGAIN,

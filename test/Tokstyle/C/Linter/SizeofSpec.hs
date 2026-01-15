@@ -5,47 +5,54 @@ import           Test.Hspec            (Spec, it, shouldBe)
 
 import qualified Data.Text             as Text
 import           Tokstyle.C.Linter     (allWarnings, analyse)
-import           Tokstyle.C.LinterSpec (mustParse)
+import           Tokstyle.C.LinterSpec (check)
 
 
 spec :: Spec
 spec = do
     it "should give diagnostics on passing pointers to sizeof" $ do
-        ast <- mustParse
-            [ "int foo(void) {"
-            , "  char *ptr;"
-            , "  return sizeof ptr;"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "int foo(void) {"
+                , "  char *ptr;"
+                , "  return sizeof ptr;"
+                , "}"
+                ]
+        check ["sizeof"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:3: (column 17) [ERROR]  >>> Type mismatch"
-                , "  disallowed sizeof argument of type `char *` - did you mean for `ptr` to be an array?"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: disallowed sizeof argument of type `char *` - did you mean for `ptr` to be an array? [-Wsizeof]"
+                , "   --> test.c:3:17"
+                , "    |"
+                , "3   |   return sizeof ptr;"
+                , "    |                 ^^^"
+                , "    |"
                 ]
             ]
 
     it "should give diagnostics on passing array-element pointers to sizeof" $ do
-        ast <- mustParse
-            [ "int foo(void) {"
-            , "  char arr[10];"
-            , "  return sizeof &arr[0];"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "int foo(void) {"
+                , "  char arr[10];"
+                , "  return sizeof &arr[0];"
+                , "}"
+                ]
+        check ["sizeof"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:3: (column 17) [ERROR]  >>> Type mismatch"
-                , "  disallowed sizeof argument of type `char *` - did you mean for `&arr[0]` to be an array?"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: disallowed sizeof argument of type `char *` - did you mean for `&arr[0]` to be an array? [-Wsizeof]"
+                , "   --> test.c:3:17"
+                , "    |"
+                , "3   |   return sizeof &arr[0];"
+                , "    |                 ^^^^^^^"
+                , "    |"
                 ]
             ]
 
     it "should not diagnostics on passing arrays to sizeof" $ do
-        ast <- mustParse
-            [ "int foo(void) {"
-            , "  char arr[10];"
-            , "  return sizeof arr;"
-            , "}"
-            ]
-        analyse allWarnings ast
-            `shouldBe` []
+        let code =
+                [ "int foo(void) {"
+                , "  char arr[10];"
+                , "  return sizeof arr;"
+                , "}"
+                ]
+        check ["sizeof"] code `shouldBe` []

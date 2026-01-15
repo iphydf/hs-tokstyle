@@ -23,7 +23,7 @@ forbidden =
     , ("atol"    , ("does not perform error checking"                        , Just "`strtol`"))
     , ("gets"    , ("performs unbounded writes to buffers"                   , Just "`fgets`"))
     , ("sprintf" , ("has no way of bounding the number of characters written", Just "`snprintf`"))
-    , ("strerror", ("is not thread safe"                                     , Just "`strerror_r` or `net_new_strerror`"))
+    , ("strerror", ("is not thread safe"                                     , Just "`strerror_r` or `net_strerror`"))
     , ("strcat"  , ("has no way of bounding the number of characters written", Just "`snprintf`"))
     , ("strcpy"  , ("has no way of bounding the number of characters written", Just "`snprintf` or `strlen` and `memcpy`"))
     , ("strncpy" , ("may not null-terminate the target string"               , Just "`snprintf` or `strlen` and `memcpy`"))

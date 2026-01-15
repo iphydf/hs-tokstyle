@@ -2,27 +2,27 @@
 {-# LANGUAGE Strict            #-}
 module Tokstyle.C.Linter.Conversion (analyse) where
 
+import           Control.Monad                   (unless)
 import           Data.Functor.Identity           (Identity)
 import           Data.List                       (isSuffixOf)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
-import           Language.C.Analysis.SemError    (typeMismatch)
 import           Language.C.Analysis.SemRep      (FunDef (..), FunType (..),
                                                   GlobalDecls, IdentDecl (..),
                                                   IntType (..), Type (..),
                                                   TypeName (..), VarDecl (..),
                                                   mergeTypeQuals, noTypeQuals)
-import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT,
-                                                  recordError)
+import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT)
 import           Language.C.Analysis.TypeUtils   (canonicalType, sameType,
                                                   typeQualsUpd)
 import           Language.C.Data.Node            (NodeInfo)
 import           Language.C.Data.Position        (posFile, posOf)
-import           Language.C.Pretty               (pretty)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (Annotated, CAssignOp (..),
                                                   CExpr, CExpression (..),
                                                   CStatement (..), annotation)
+import           Prettyprinter                   (pretty)
 import qualified Tokstyle.C.Env                  as Env
-import           Tokstyle.C.Env                  (Env)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
@@ -35,32 +35,29 @@ typeEq a b = sameType (canon a) (canon b)
 removeQuals :: Type -> Type
 removeQuals = typeQualsUpd (mergeTypeQuals noTypeQuals)
 
-checkConversion :: (Annotated node, MonadTrav m) => String -> (CExpr, Type) -> (node NodeInfo, Type) -> m ()
+checkConversion :: (Annotated node) => String -> (CExpr, Type) -> (node NodeInfo, Type) -> TravT Env Identity ()
 -- Ignore cmp.c, it does a lot of implicit conversions.
 -- TODO(iphydf): Maybe it shouldn't? UBSAN also warns about it.
 checkConversion _ (r, _) (_, _) | "cmp/cmp.c" `isSuffixOf` posFile (posOf (annotation r)) = return ()
 
-checkConversion context (r, rTy') (l, lTy') =
-    if isAllowed then return () else recordError errorMsg
+checkConversion context (r, rTy') (_, lTy') =
+    unless isAllowed $
+        recordLinterError (annotation r) $
+            "invalid conversion from `" <> pretty rTyName <> "` to `" <>
+                pretty lTyName <> "` in " <> pretty context
   where
     rTy = removeQuals rTy'
     lTy = removeQuals lTy'
     rCanon = canonicalType rTy
     lCanon = canonicalType lTy
-    rTyName = show $ pretty rTy
-    lTyName = show $ pretty lTy
-
-    errorMsg = typeMismatch
-        ("invalid conversion from `" <> rTyName <> "` to `" <>
-            lTyName <> "` in " <> context)
-        (annotation l, lTy)
-        (annotation r, rTy)
+    rTyName = show $ C.pretty rTy
+    lTyName = show $ C.pretty lTy
 
     isAllowed =
         isNullPtr rTy'
         || typeEq lTy rTy
         || sameType rCanon lCanon
-        || show (pretty rCanon) == show (pretty lCanon)
+        || show (C.pretty rCanon) == show (C.pretty lCanon)
         || case (rCanon, lCanon) of
             (PtrType rPtd _ _, PtrType lPtd _ _) ->
                 typeEq lPtd rPtd || isVoidPtr lCanon
@@ -108,7 +105,7 @@ checkConversion context (r, rTy') (l, lTy') =
     isPtr ArrayType{} = True
     isPtr _           = False
 
-checkAssign :: MonadTrav m => String -> (CExpr, Type) -> (CExpr, Type) -> m ()
+checkAssign :: String -> (CExpr, Type) -> (CExpr, Type) -> TravT Env Identity ()
 checkAssign _ _ (CConst{}, _) = return ()
 checkAssign _ _ (CCast{}, _)  = return ()
 checkAssign c l r             = checkConversion c r l

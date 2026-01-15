@@ -4,186 +4,220 @@ module Tokstyle.C.Linter.SizeArgSpec (spec) where
 import           Test.Hspec            (Spec, it, shouldBe)
 
 import qualified Data.Text             as Text
-import           Tokstyle.C.Linter     (allWarnings, analyse)
-import           Tokstyle.C.LinterSpec (mustParse)
+import           Tokstyle.C.LinterSpec (check)
 
 
 spec :: Spec
 spec = do
     it "warns when constant size argument is not the array size" $ do
-        ast <- mustParse
-            [ "void consume(char *arr, int size);"
-            , "void caller(void) {"
-            , "  char arr[12];"
-            , "  consume(arr, 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "void consume(char *arr, int size);"
+                , "void caller(void) {"
+                , "  char arr[12];"
+                , "  consume(arr, 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:4: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [12]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [12]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:4:16"
+                , "    |"
+                , "4   |   consume(arr, 13);"
+                , "    |                ^^"
+                , "    |"
                 ]
             ]
 
     it "can see through enum constants" $ do
-        ast <- mustParse
-            [ "enum { SIZE = 12 };"
-            , "void consume(char *arr, int size);"
-            , "void caller(void) {"
-            , "  char arr[SIZE];"
-            , "  consume(arr, SIZE + 1);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "enum { SIZE = 12 };"
+                , "void consume(char *arr, int size);"
+                , "void caller(void) {"
+                , "  char arr[SIZE];"
+                , "  consume(arr, SIZE + 1);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:5: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `SIZE + 1` (= 13),"
-                , "  which is greater than the array size of `char [SIZE]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `SIZE + 1` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [SIZE]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:5:16"
+                , "    |"
+                , "5   |   consume(arr, SIZE + 1);"
+                , "    |                ^^^^^^^^"
+                , "    |"
                 ]
             ]
 
     it "can see through typedefs" $ do
-        ast <- mustParse
-            [ "enum { SIZE = 12 };"
-            , "typedef unsigned int size_t;"
-            , "void consume(char *arr, size_t size);"
-            , "void caller(void) {"
-            , "  char arr[SIZE];"
-            , "  consume(arr, SIZE + 1);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "enum { SIZE = 12 };"
+                , "typedef unsigned int size_t;"
+                , "void consume(char *arr, size_t size);"
+                , "void caller(void) {"
+                , "  char arr[SIZE];"
+                , "  consume(arr, SIZE + 1);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:6: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `SIZE + 1` (= 13),"
-                , "  which is greater than the array size of `char [SIZE]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `SIZE + 1` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [SIZE]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:6:16"
+                , "    |"
+                , "6   |   consume(arr, SIZE + 1);"
+                , "    |                ^^^^^^^^"
+                , "    |"
                 ]
             ]
 
     it "can see through array typedefs" $ do
-        ast <- mustParse
-            [ "typedef char My_Array[12];"
-            , "void consume(char *arr, int size);"
-            , "void caller(void) {"
-            , "  My_Array arr;"
-            , "  consume(arr, 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "typedef char My_Array[12];"
+                , "void consume(char *arr, int size);"
+                , "void caller(void) {"
+                , "  My_Array arr;"
+                , "  consume(arr, 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:5: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [12]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [12]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:5:16"
+                , "    |"
+                , "5   |   consume(arr, 13);"
+                , "    |                ^^"
+                , "    |"
                 ]
             ]
 
     it "can see through function typedefs" $ do
-        ast <- mustParse
-            [ "typedef void consume_cb(char *arr, int size);"
-            , "consume_cb consume;"
-            , "void caller(void) {"
-            , "  char arr[12];"
-            , "  consume(arr, 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "typedef void consume_cb(char *arr, int size);"
+                , "consume_cb consume;"
+                , "void caller(void) {"
+                , "  char arr[12];"
+                , "  consume(arr, 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:5: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [12]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [12]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:5:16"
+                , "    |"
+                , "5   |   consume(arr, 13);"
+                , "    |                ^^"
+                , "    |"
                 ]
             ]
 
     it "works on function pointers" $ do
-        ast <- mustParse
-            [ "typedef void consume_cb(char *arr, int size);"
-            , "void caller(consume_cb *consume) {"
-            , "  char arr[12];"
-            , "  consume(arr, 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "typedef void consume_cb(char *arr, int size);"
+                , "void caller(consume_cb *consume) {"
+                , "  char arr[12];"
+                , "  consume(arr, 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:4: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [12]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [12]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:4:16"
+                , "    |"
+                , "4   |   consume(arr, 13);"
+                , "    |                ^^"
+                , "    |"
                 ]
             ]
 
     it "works on array parameters" $ do
-        ast <- mustParse
-            [ "typedef void consume_cb(char *arr, int size);"
-            , "void caller(consume_cb *consume, char arr[12]) {"
-            , "  consume(arr, 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "typedef void consume_cb(char *arr, int size);"
+                , "void caller(consume_cb *consume, char arr[12]) {"
+                , "  consume(arr, 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:3: (column 16) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [12]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [12]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:3:16"
+                , "    |"
+                , "3   |   consume(arr, 13);"
+                , "    |                ^^"
+                , "    |"
                 ]
             ]
 
     it "works on typedef array parameters" $ do
-        ast <- mustParse
-            [ "enum { CRYPTO_PUBLIC_KEY_SIZE = 32 };"
-            , "enum { EXTENDED_PUBLIC_KEY_SIZE = 64 };"
-            , "typedef char Public_Key[CRYPTO_PUBLIC_KEY_SIZE];"
-            , "typedef void consume_cb(char *arr, int size);"
-            , "void caller(consume_cb *consume, Public_Key pk) {"
-            , "  consume(pk, EXTENDED_PUBLIC_KEY_SIZE);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "enum { CRYPTO_PUBLIC_KEY_SIZE = 32 };"
+                , "enum { EXTENDED_PUBLIC_KEY_SIZE = 64 };"
+                , "typedef char Public_Key[CRYPTO_PUBLIC_KEY_SIZE];"
+                , "typedef void consume_cb(char *arr, int size);"
+                , "void caller(consume_cb *consume, Public_Key pk) {"
+                , "  consume(pk, EXTENDED_PUBLIC_KEY_SIZE);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:6: (column 15) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `EXTENDED_PUBLIC_KEY_SIZE` (= 64),"
-                , "  which is greater than the array size of `char [CRYPTO_PUBLIC_KEY_SIZE]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `EXTENDED_PUBLIC_KEY_SIZE` (= 64), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [CRYPTO_PUBLIC_KEY_SIZE]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:6:15"
+                , "    |"
+                , "6   |   consume(pk, EXTENDED_PUBLIC_KEY_SIZE);"
+                , "    |               ^^^^^^^^^^^^^^^^^^^^^^^^"
+                , "    |"
                 ]
             ]
 
     it "warns about string literal overrun" $ do
-        ast <- mustParse
-            [ "void consume(char *arr, int size);"
-            , "void caller(void) {"
-            , "  consume(\"hello world\", 13);"
-            , "}"
-            ]
-        analyse allWarnings ast
+        let code =
+                [ "void consume(char *arr, int size);"
+                , "void caller(void) {"
+                , "  consume(\"hello world\", 13);"
+                , "}"
+                ]
+        check ["size-arg"] code
             `shouldBe`
-            [ Text.unlines
-                [ "test.c:3: (column 26) [ERROR]  >>> Type mismatch"
-                , "  size parameter `size` is passed constant value `13` (= 13),"
-                , "  which is greater than the array size of `char [static 11]`,"
-                , "  potentially causing buffer overrun in `consume`"
+            [ Text.stripEnd $ Text.unlines
+                [ "error: size parameter `size` is passed constant value `13` (= 13), [-Wsize-arg]"
+                , "         which is greater than the array size of `char [static 11]`,"
+                , "         potentially causing buffer overrun in `consume`"
+                , "   --> test.c:3:26"
+                , "    |"
+                , "3   |   consume(\"hello world\", 13);"
+                , "    |                          ^^"
+                , "    |"
                 ]
             ]
 
     it "ignores calls where the parameter name does not indicate it's a size" $ do
-        ast <- mustParse
-            [ "typedef char My_Array[12];"
-            , "void consume(char *file, int line);"
-            , "void caller(void) {"
-            , "  consume(\"hello.c\", 123);"
-            , "}"
-            ]
-        analyse allWarnings ast
-            `shouldBe` []
+        let code =
+                [ "typedef char My_Array[12];"
+                , "void consume(char *file, int line);"
+                , "void caller(void) {"
+                , "  consume(\"hello.c\", 123);"
+                , "}"
+                ]
+        check ["size-arg"] code `shouldBe` []

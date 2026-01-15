@@ -10,12 +10,12 @@ import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemError    (invalidAST)
 import           Language.C.Analysis.SemRep      (GlobalDecls, ParamDecl (..),
                                                   Type (..), VarDecl (..))
-import           Language.C.Analysis.TravMonad   (Trav, TravT, recordError,
-                                                  throwTravError)
-import           Language.C.Pretty               (pretty)
+import           Language.C.Analysis.TravMonad   (Trav, TravT, throwTravError)
+import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpr, CExpression (..),
                                                   annotation)
-import           Tokstyle.C.Env                  (Env)
+import           Prettyprinter                   (pretty)
+import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
@@ -35,10 +35,9 @@ checkParams (ParamDecl (VarDecl _ _ cbTy@(FunPtrParams params)) _, expr, ty) = d
     case mapMaybe paramNames $ zip3 [1..] params cbParams of
         [] -> return ()
         (i, a, b):_ ->
-            let annot = annotation expr in
-            recordError $ invalidAST annot (
-                "parameter " <> show i <> " of " <> show (pretty expr) <> " is named `"
-                <> b <> "`, but in callback type `" <> show (pretty cbTy) <> "` it is named `" <> a <> "`")
+            recordLinterError (annotation expr) $
+                "parameter " <> pretty i <> " of " <> pretty (show (C.pretty expr)) <> " is named `"
+                <> pretty b <> "`, but in callback type `" <> pretty (show (C.pretty cbTy)) <> "` it is named `" <> pretty a <> "`"
 checkParams _ = return ()
 
 

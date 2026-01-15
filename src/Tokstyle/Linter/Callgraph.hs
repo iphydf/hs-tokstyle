@@ -340,6 +340,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "AF_UNSPEC"
 
         , "EBADF"
+        , "EINTR"
         , "EINPROGRESS"
         , "EWOULDBLOCK"
 
@@ -406,6 +407,9 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "sodium_mlock"
         , "sodium_munlock"
 
+        , nktype "ev_async"
+        , nktype "ev_io"
+        , nktype "ev_loop"
         , "EVBREAK_ALL"
         , "EV_READ"
         , "ev_async"
@@ -528,6 +532,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "setsockopt"
         , "socket"
         , nktype "addrinfo"
+        , nktype "fd_set"
         , nktype "ifconf"
         , nktype "ifreq"
         , nktype "in_addr"
@@ -541,14 +546,27 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
 
         , "EPOLL_CTL_ADD"
         , "EPOLL_CTL_MOD"
+        , "EPOLL_CTL_DEL"
         , "EPOLLERR"
         , "EPOLLET"
         , "EPOLLHUP"
         , "EPOLLIN"
+        , "EPOLLOUT"
         , "epoll_create"
+        , "epoll_create1"
+        , "EPOLL_CLOEXEC"
         , "epoll_ctl"
         , "epoll_wait"
         , nktype "epoll_event"
+
+        , "POLLIN"
+        , "POLLPRI"
+        , "POLLOUT"
+        , "POLLERR"
+        , "POLLHUP"
+        , "POLLNVAL"
+        , "poll"
+        , nktype "pollfd"
 
         , "__FILE__"
         , "__LINE__"
