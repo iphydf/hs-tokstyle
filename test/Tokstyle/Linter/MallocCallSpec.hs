@@ -1,36 +1,51 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.MallocCallSpec where
+module Tokstyle.Linter.MallocCallSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (allWarnings, analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["malloc-call"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["malloc-call"]
 
 
 spec :: Spec
 spec = do
     it "warns when mem_alloc() is used outside a var decl stmt" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(My_Struct **v) {"
             , "  *v = (My_Struct *)mem_alloc(mem, sizeof(My_Struct));"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            ["test.c:2: allocations using `mem_alloc` must first be assigned to a local variable or returned directly [-Wmalloc-call]"]
+            [[ "warning: allocations using `mem_alloc` must first be assigned to a local variable or returned directly [-Wmalloc-call]"
+             , "   --> test.c:2:21"
+             , "    |"
+             , "   2|   *v = (My_Struct *)mem_alloc(mem, sizeof(My_Struct));"
+             , "    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+             ]]
 
     it "warns if there is no null-check after an allocation" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void a(My_Struct **v) {"
             , "  My_Struct *tmp = (My_Struct *)mem_alloc(mem, sizeof(My_Struct));"
             , "  *v = tmp;"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe` ["test.c:3: `tmp`, assigned from `mem_alloc` must immediately be checked against `nullptr` [-Wmalloc-call]"]
+            [[ "warning: `tmp`, assigned from `mem_alloc` must immediately be checked against `nullptr` [-Wmalloc-call]"
+             , "   --> test.c:3:4"
+             , "    |"
+             , "   3|   *v = tmp;"
+             , "    |    ^^^^^^^"
+             ]]
 
     it "accepts mem_alloc() being used in a var decl stmt" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "bool a(My_Struct **v) {"
             , "  My_Struct *tmp = (My_Struct *)mem_alloc(mem, sizeof(My_Struct));"
             , "  if (tmp == nullptr) {"
@@ -40,14 +55,10 @@ spec = do
             , "  return true;"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe` []
 
     it "accepts mem_alloc() being used in a return statement" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "My_Struct *my_struct_new(void) {"
             , "  return (My_Struct *)mem_alloc(mem, sizeof(My_Struct));"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe` []

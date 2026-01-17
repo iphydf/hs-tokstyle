@@ -10,12 +10,14 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LiteralType (String),
                                               Node, NodeF (..), lexemeText)
-import qualified Language.Cimple.Diagnostics as Diagnostics
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (warn, warnDoc)
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act -> case unFix node of
         -- LOGGER_ASSERT has its format as the third parameter.
@@ -34,20 +36,20 @@ linter = astActions
     }
 
 
-checkFormat :: FilePath -> Lexeme Text -> State [Text] ()
+checkFormat :: FilePath -> Lexeme Text -> State [Diagnostic CimplePos] ()
 checkFormat file fmt =
     when ("\\" `Text.isInfixOf` text) $
-        Diagnostics.warn file fmt $
-            "logger format "
-            <> text
-            <> " contains escape sequences (newlines, tabs, or escaped quotes)"
+        warnDoc file fmt $
+            "logger format"
+            <+> pretty text
+            <+> "contains escape sequences (newlines, tabs, or escaped quotes)"
     where text = lexemeText fmt
 
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("logger-no-escapes", Text.unlines
     [ "Checks that no escape sequences are present in the logger format string."
     , ""

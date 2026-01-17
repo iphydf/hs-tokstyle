@@ -10,26 +10,27 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..),
                                               Scope (..))
-import           Language.Cimple.Diagnostics (warn)
-import           Language.Cimple.Pretty      (showNode)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
+import           Language.Cimple.Pretty      (ppNode)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty)
 import qualified Tokstyle.Common             as Common
-import           Tokstyle.Common             (semEq)
+import           Tokstyle.Common             (semEq, warnDoc)
 import           Tokstyle.Common.Patterns
 
 
-checkTypes :: Text -> FilePath -> Node (Lexeme Text) -> Node (Lexeme Text) -> State [Text] ()
+checkTypes :: Text -> FilePath -> Node (Lexeme Text) -> Node (Lexeme Text) -> State [Diagnostic CimplePos] ()
 checkTypes funName file castTy sizeofTy = case unFix castTy of
     TyPointer (Fix (TyStd (L _ _ tyName))) | not ("pthread_" `Text.isPrefixOf` tyName) ->
-        warn file castTy $
-            "`" <> funName <> "` should not be used for `" <> showNode castTy
+        warnDoc file castTy $
+            "`" <> pretty funName <> "` should not be used for `" <> ppNode castTy
             <> "`; use `mem_balloc` instead"
     TyPointer ty1 | ty1 `semEq` sizeofTy -> return ()
     TyOwner (Fix (TyPointer ty1)) | ty1 `semEq` sizeofTy -> return ()
-    _ -> warn file castTy $
-        "`" <> funName <> "` result is cast to `" <> showNode castTy
-        <> "` but allocated type is `" <> showNode sizeofTy <> "`"
+    _ -> warnDoc file castTy $
+        "`" <> pretty funName <> "` result is cast to `" <> ppNode castTy
+        <> "` but allocated type is `" <> ppNode sizeofTy <> "`"
 
 
 pattern Calloc :: Text -> [Node (Lexeme Text)] -> Node (Lexeme Text)
@@ -46,7 +47,7 @@ isCalloc "mem_valloc"   = True
 isCalloc "mem_vrealloc" = True
 isCalloc _              = False
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act -> case node of
         CallocCast castTy funName@"calloc" [_, Fix (SizeofType sizeofTy)] ->
@@ -63,7 +64,7 @@ linter = astActions
             checkTypes funName file castTy sizeofTy
 
         Calloc funName _ | isCalloc funName ->
-            warn file node $ "the result of `" <> funName <> "` must be cast to its member type"
+            warnDoc file node $ "the result of `" <> pretty funName <> "` must be cast to its member type"
 
         Fix (FunctionDefn Static (Fix (FunctionPrototype TY_void_ptr _ _)) _) ->
             -- Ignore static functions returning void pointers. These are allocator
@@ -73,7 +74,7 @@ linter = astActions
         _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter . Common.skip
     [ "toxav/rtp.c"
     , "toxcore/list.c"
@@ -81,7 +82,7 @@ analyse = reverse . flip State.execState [] . traverseAst linter . Common.skip
     , "toxcore/os_memory.c"
     ]
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("calloc-type", Text.unlines
     [ "Checks that `mem_alloc` and other `calloc`-like functions are cast to the"
     , "correct type. The types in the `sizeof` expression and the type-cast expression"

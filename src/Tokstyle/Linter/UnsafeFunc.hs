@@ -10,9 +10,11 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 forbidden :: [(Text, (Text, Maybe Text))]
 forbidden =
@@ -35,21 +37,21 @@ forbidden =
 checkName :: Text -> Maybe (Text, (Text, Maybe Text))
 checkName name = (name,) <$> lookup name forbidden
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
             FunctionCall (Fix (VarExpr (L _ _ (checkName -> Just (name, (msg, replacement)))))) _ ->
-                warn file node $ "function `" <> name <> "` should not be used, because it " <> msg
-                    <> maybe "" (\r -> "; use " <> r <> " instead") replacement
+                warnDoc file node $ "function" <+> backticks (pretty name) <+> "should not be used, because it" <+> pretty msg
+                    <> maybe "" (\r -> "; use" <+> pretty r <+> "instead") replacement
 
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("unsafe-func", Text.unlines
     [ "Explicitly forbids the use of some C functions considered unsafe:"
     , ""

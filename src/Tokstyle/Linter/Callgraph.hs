@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor     #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -27,7 +28,10 @@ import           Language.Cimple             (AlexPosn (..), Lexeme (..),
                                               LexemeClass (..),
                                               LiteralType (..), Node,
                                               NodeF (..), lexemeText)
-import           Language.Cimple.Diagnostics (Diagnostics, warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              DiagnosticsT)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data NameKind
@@ -145,7 +149,7 @@ callgraph = funcs . mconcat . concatMap (uncurry $ map . foldFix . go)
     go file (EnumDecl _ envs name) =
         let Env{outgoing, funcs} = fold envs in
         empty{funcs = Map.insert (Name NKType file name) outgoing funcs}
-    go file (Typedef env name) =
+    go file (Typedef env name _) =
         let Env{outgoing, funcs} = env in
         env{funcs = Map.insert (Name NKTypedef file name) outgoing funcs}
 
@@ -160,7 +164,7 @@ callgraph = funcs . mconcat . concatMap (uncurry $ map . foldFix . go)
     go _ n = fold n
 
 
-checkReferences :: Callgraph -> Diagnostics ()
+checkReferences :: Callgraph -> DiagnosticsT [Diagnostic CimplePos] ()
 checkReferences cg =
     forM_ (Map.assocs cg) $ \(src, dsts) ->
         mapM_ (checkForward src) dsts
@@ -172,17 +176,17 @@ checkReferences cg =
             NKVal     -> Nothing)
     checkForward src dst = do
         unless (any (`Map.member` cg) $ dests dst) $
-            warn (nameFile dst) (nameLexeme dst) $ "definition of `" <> nameText src
-                <> "` references undefined global " <> nameKindStr dst
-                <> " `" <> nameText dst <> "`"
+            warnDoc (nameFile dst) (nameLexeme dst) $ "definition of" <+> backticks (pretty (nameText src))
+                <+> "references undefined global" <+> pretty (nameKindStr dst)
+                <+> backticks (pretty (nameText dst))
 
         let isTestOnly name = "testonly" `Text.isInfixOf` nameText name
         when (isTestOnly dst && not (isTestOnly src)) $
-            warn (nameFile src) (nameLexeme src) $ "non-testonly function `" <> nameText src
-                <> "` calls testonly function `" <> nameText dst <> "`"
+            warnDoc (nameFile src) (nameLexeme src) $ "non-testonly function" <+> backticks (pretty (nameText src))
+                <+> "calls testonly function" <+> backticks (pretty (nameText dst))
 
 
-checkCycles :: Callgraph -> Diagnostics ()
+checkCycles :: Callgraph -> DiagnosticsT [Diagnostic CimplePos] ()
 checkCycles cg =
     forM_ (Graph.stronglyConnCompR edgeList) $ \case
         AcyclicSCC{} -> return ()
@@ -203,18 +207,18 @@ checkCycles cg =
     cycleIsOK _ = False
 
     warnCycle (Name NKType _ _) _ = return ()
-    warnCycle src [_] = warn (nameFile src) (nameLexeme src) $
-        "function `" <> nameText src <> "` is recursive; prefer loops instead"
-    warnCycle src funcs = warn (nameFile src) (nameLexeme src) $
-        "function `" <> nameText src <> "` is part of a cycle: `" <> Text.pack (show funcs) <> "`"
+    warnCycle src [_] = warnDoc (nameFile src) (nameLexeme src) $
+        "function" <+> backticks (pretty (nameText src)) <+> "is recursive; prefer loops instead"
+    warnCycle src funcs = warnDoc (nameFile src) (nameLexeme src) $
+        "function" <+> backticks (pretty (nameText src)) <+> "is part of a cycle:" <+> backticks (pretty funcs)
 
 
-checkUnused :: Callgraph -> Diagnostics ()
+checkUnused :: Callgraph -> DiagnosticsT [Diagnostic CimplePos] ()
 checkUnused cg =
     forM_ roots $ \case
         Name NKType _ _ -> return ()
         Name NKTypedef _ _ -> return ()
-        src -> warn (nameFile src) (nameLexeme src) $ "unused symbol `" <> nameText src <> "`"
+        src -> warnDoc (nameFile src) (nameLexeme src) $ "unused symbol" <+> backticks (pretty (nameText src))
   where
     (graph, nodeFromVertex, _) = Graph.graphFromEdges . cgToEdges $ cg
 
@@ -324,14 +328,14 @@ checkUnused cg =
         ]
 
 
-linter :: Callgraph -> Diagnostics ()
+linter :: Callgraph -> DiagnosticsT [Diagnostic CimplePos] ()
 linter cg = do
     checkReferences cg
     checkCycles cg
     checkUnused cg
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
   where
     builtins = Map.fromList . map (,Set.empty) $
@@ -461,6 +465,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
 
         , "ERROR_BUFFER_OVERFLOW"
         , "NO_ERROR"
+        , "WAIT_TIMEOUT"
         , "WSAAddressToString"
         , "WSAAddressToStringA"
         , "WSACleanup"
@@ -577,12 +582,17 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "FORMAT_MESSAGE_FROM_SYSTEM"
         , "FORMAT_MESSAGE_IGNORE_INSERTS"
         , "MAKEWORD"
+        , "DeviceIoControl"
         , "FormatMessageA"
         , "GetAdaptersInfo"
+        , "GetProcessHeap"
         , "GetTickCount"
+        , "HeapAlloc"
+        , "HeapFree"
         , "LocalFree"
         , "QueryPerformanceCounter"
         , "QueryPerformanceFrequency"
+        , "Sleep"
 
         , "SYSTEM_CLOCK"
         , "host_get_clock_service"
@@ -636,6 +646,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
 
         , "INT_MAX"
         , "INT32_MAX"
+        , "INT64_MAX"
         , "UINT8_MAX"
         , "UINT16_MAX"
         , "UINT32_MAX"
@@ -713,7 +724,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "vpx_img_free"
         ]
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("callgraph", Text.unlines
     [ "Performs various call graph related checks:"
     , ""

@@ -9,11 +9,12 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               doNodes, traverseAst)
+import           Prettyprinter               (pretty, (<+>))
 import qualified Tokstyle.Common             as Common
-import           Tokstyle.Common             ((>+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc, (>+>))
 
 
 mallocFuncs :: [Text]
@@ -37,7 +38,7 @@ pattern MallocVarDecl decl initialiser <- Fix (VarDeclStmt (Fix (VarDecl _ (L _ 
 pattern MallocReturn :: Node lexeme -> Node lexeme
 pattern MallocReturn initialiser <- Fix (Return (Just initialiser))
 
-lintAssign :: AstActions (State [Text]) Text
+lintAssign :: AstActions (State [Diagnostic CimplePos]) Text
 lintAssign = astActions
     { doNode = \file node act -> case node of
         MallocVarDecl _ (FunctionCast name) | name `elem` mallocFuncs -> return ()
@@ -48,8 +49,8 @@ lintAssign = astActions
         MallocReturn    (FunCall      name) | name `elem` mallocFuncs -> return ()
 
         FunCall name | name `elem` mallocFuncs ->
-            warn file node $ "allocations using `" <> name
-                <> "` must first be assigned to a local variable or "
+            warnDoc file node $ "allocations using" <+> backticks (pretty name)
+                <+> "must first be assigned to a local variable or "
                 <> "returned directly"
 
         _ -> act
@@ -64,7 +65,7 @@ pattern ConstNull, VarNull :: Node (Lexeme Text)
 pattern ConstNull <- Fix (LiteralExpr _ (L _ _ "nullptr"))
 pattern VarNull <- Fix (VarExpr (L _ _ "nullptr"))
 
-lintCheck :: AstActions (State [Text]) Text
+lintCheck :: AstActions (State [Diagnostic CimplePos]) Text
 lintCheck = astActions
     { doNodes = \file nodes act -> case nodes of
         (MallocVarDecl decl FunctionCast{}:ss@(NullCheck ref ConstNull:_)) | decl == ref ->
@@ -72,13 +73,13 @@ lintCheck = astActions
         (MallocVarDecl decl FunctionCast{}:ss@(NullCheck ref VarNull:_)) | decl == ref ->
             traverseAst lintCheck (file, ss)
         (MallocVarDecl decl (FunctionCast name):s:_) | name `elem` mallocFuncs ->
-            warn file s $ "`" <> decl <> "`, assigned from `" <> name
-                <> "` must immediately be checked against `nullptr`"
+            warnDoc file s $ backticks (pretty decl) <> ", assigned from" <+> backticks (pretty name)
+                <+> "must immediately be checked against `nullptr`"
 
         _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . (traverseAst lintCheck >+> traverseAst lintAssign)
     -- TODO(iphydf): Refactor after the toxav PR.
     . Common.skip
@@ -91,7 +92,7 @@ analyse = reverse . flip State.execState [] . (traverseAst lintCheck >+> travers
         , "toxav/video.c"
         ]
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("malloc-call", Text.unlines
     [ "Checks that allocation functions like `mem_balloc` are always first assigned to"
     , "a local variable. The exception is in a return statement, e.g. in simple typed"

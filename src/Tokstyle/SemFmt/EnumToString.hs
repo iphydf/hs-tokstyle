@@ -2,15 +2,16 @@
 {-# LANGUAGE Strict            #-}
 module Tokstyle.SemFmt.EnumToString (descr) where
 
-import           Data.Fix                   (Fix (..))
-import           Data.Maybe                 (mapMaybe)
-import           Data.Text                  (Text)
-import qualified Data.Text                  as Text
-import           Language.Cimple            (Lexeme (..), LexemeClass (..),
-                                             LiteralType (..), Node, NodeF (..),
-                                             lexemeText)
-import           Tokstyle.Common.EnumLinter (EnumInfo (EnumInfo), MkFunBody,
-                                             analyseEnums, mkLAt)
+import           Data.Fix                    (Fix (..))
+import           Data.Maybe                  (mapMaybe)
+import           Data.Text                   (Text)
+import qualified Data.Text                   as Text
+import           Language.Cimple             (Lexeme (..), LexemeClass (..),
+                                              LiteralType (..), Node,
+                                              NodeF (..), lexemeText)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
+import           Tokstyle.Common.EnumLinter  (EnumInfo (EnumInfo), MkFunBody,
+                                              analyseEnums, mkLAt)
 
 
 funSuffix :: Text
@@ -36,10 +37,10 @@ mkFunBody _ varName (EnumInfo ename enumrs) = do
         ])
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = analyseEnums funSuffix mkFunBody
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("enum-to-string", Text.unlines
     [ "Checks that `_to_string` functions for `enum`s are complete."
     , ""

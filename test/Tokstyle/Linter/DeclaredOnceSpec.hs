@@ -1,56 +1,66 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.DeclaredOnceSpec where
+module Tokstyle.Linter.DeclaredOnceSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseGlobal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAccept, shouldWarn, testC)
+
+
+shouldWarn' :: [(FilePath, [Text])] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarn ["declared-once"]
+
+
+shouldAccept' :: [(FilePath, [Text])] -> IO ()
+shouldAccept' = shouldAccept ["declared-once"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid declarations" $ do
-        ast1 <- mustParse
-            [ "int foo(void);"
+        shouldAccept'
+            [ ("test1.h", [ "int foo(void);" ])
+            , ("test2.c", [ "int foo(void) { return 0; }" ])
             ]
-        ast2 <- mustParse
-            [ "int foo(void) { return 0; }"
-            ]
-        analyseGlobal ["declared-once"] [("test1.h", ast1), ("test2.c", ast2)]
-            `shouldBe`
-            []
 
     it "should give diagnostics on duplicate declaration in the same file" $ do
-        ast <- mustParse
+        shouldWarn' (testC
             [ "void foo(void);"
             , "void foo(void);"
-            ]
-        analyseGlobal ["declared-once"] [("test.c", ast)]
-            `shouldBe`
-            [ "test.c:1: duplicate declaration of function `foo` [-Wdeclared-once]"
-            , "test.c:2: function `foo` also declared here [-Wdeclared-once]"
-            ]
+            ])
+            [[ "warning: duplicate declaration of function `foo` [-Wdeclared-once]"
+             , "   --> test.c:1:6"
+             , "    |"
+             , "   1| void foo(void);"
+             , "    |      ^^^"
+             ]
+            ,[ "warning: function `foo` also declared here [-Wdeclared-once]"
+             , "   --> test.c:2:6"
+             , "    |"
+             , "   2| void foo(void);"
+             , "    |      ^^^"
+             ]]
 
     it "should give diagnostics on duplicate declaration in different files" $ do
-        ast1 <- mustParse
-            [ "void foo(void);"
+        shouldWarn'
+            [ ("test1.h", [ "void foo(void);" ])
+            , ("test2.h", [ "void foo(void);" ])
             ]
-        ast2 <- mustParse
-            [ "void foo(void);"
-            ]
-        analyseGlobal ["declared-once"] [("test1.h", ast1), ("test2.h", ast2)]
-            `shouldBe`
-            [ "test1.h:1: duplicate declaration of function `foo` [-Wdeclared-once]"
-            , "test2.h:1: function `foo` also declared here [-Wdeclared-once]"
-            ]
+            [[ "warning: duplicate declaration of function `foo` [-Wdeclared-once]"
+             , "   --> test1.h:1:6"
+             , "    |"
+             , "   1| void foo(void);"
+             , "    |      ^^^"
+             ]
+            ,[ "warning: function `foo` also declared here [-Wdeclared-once]"
+             , "   --> test2.h:1:6"
+             , "    |"
+             , "   1| void foo(void);"
+             , "    |      ^^^"
+             ]]
 
     it "should not give diagnostics for multiple definitions" $ do
-        ast1 <- mustParse
-            [ "int foo(void) { return 0; }"
+        shouldAccept'
+            [ ("test1.c", [ "int foo(void) { return 0; }" ])
+            , ("test2.c", [ "int foo(void) { return 0; }" ])
             ]
-        ast2 <- mustParse
-            [ "int foo(void) { return 0; }"
-            ]
-        analyseGlobal ["declared-once"] [("test1.c", ast1), ("test2.c", ast2)]
-            `shouldBe`
-            []

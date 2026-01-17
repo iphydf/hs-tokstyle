@@ -8,13 +8,14 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
 import           System.FilePath             (takeFileName)
+import           Tokstyle.Common             (warn)
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -30,11 +31,11 @@ linter = astActions
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse (file, _) | takeFileName file `elem` ["logger.c", "logger.h"] = []
 analyse tu = reverse . flip State.execState [] . traverseAst linter $ tu
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("logger-const", Text.unlines
     [ "Checks that `Logger` is always passed as `const Logger *` except in `logger.c`."
     , ""

@@ -1,52 +1,58 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.MemcpyStructsSpec where
+module Tokstyle.Linter.MemcpyStructsSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["memcpy-structs"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["memcpy-structs"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid memcpy calls" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  memcpy(a, b, 10);"
             , "}"
             ]
-        analyseLocal ["memcpy-structs"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid memcpy calls" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void foo(void) {"
             , "  memcpy(a, b, sizeof(My_Struct));"
             , "}"
             ]
-        analyseLocal ["memcpy-structs"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: `memcpy` should not be used for structs like `\ESC[0;32mMy_Struct\ESC[0m`; use assignment instead [-Wmemcpy-structs]"
-            ]
+            [[ "warning: `memcpy` should not be used for structs like `My_Struct`; use assignment instead [-Wmemcpy-structs]"
+             , "   --> test.c:2:23"
+             , "    |"
+             , "   2|   memcpy(a, b, sizeof(My_Struct));"
+             , "    |                       ^^^^^^^^^"
+             ]]
 
     it "should not give diagnostics on valid memset calls" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  memset(a, 0, 10);"
             , "}"
             ]
-        analyseLocal ["memcpy-structs"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid memset calls" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void foo(void) {"
             , "  memset(a, 0, sizeof(My_Struct));"
             , "}"
             ]
-        analyseLocal ["memcpy-structs"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: `memset` should not be used for structs like `\ESC[0;32mMy_Struct\ESC[0m`; use `(Type) {0}` instead [-Wmemcpy-structs]"
-            ]
+            [[ "warning: `memset` should not be used for structs like `My_Struct`; use `(Type) {0}` instead [-Wmemcpy-structs]"
+             , "   --> test.c:2:23"
+             , "    |"
+             , "   2|   memset(a, 0, sizeof(My_Struct));"
+             , "    |                       ^^^^^^^^^"
+             ]]

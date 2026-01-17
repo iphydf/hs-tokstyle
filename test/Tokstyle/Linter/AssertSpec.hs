@@ -1,52 +1,43 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.AssertSpec where
+module Tokstyle.Linter.AssertSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["assert"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["assert"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on pure expressions in assert" $ do
-        ast <- mustParse
-            [ "void a(int b) { assert(b == 1); }"
-            ]
-        analyseLocal ["assert"] ("test.c", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void a(int b) { assert(b == 1); }" ]
 
     it "should not give diagnostics on exempt functions in assert" $ do
-        ast <- mustParse
-            [ "void a(void *x, void *y, int z) { assert(memcmp(x, y, z) == 0); }"
-            ]
-        analyseLocal ["assert"] ("test.c", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void a(void *x, void *y, int z) { assert(memcmp(x, y, z) == 0); }" ]
 
     it "should give diagnostics on non-pure functions in assert" $ do
-        ast <- mustParse
-            [ "void a(int b) { assert(some_function(b) == 1); }"
-            ]
-        analyseLocal ["assert"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:1: non-pure function `some_function` cannot be called inside `assert()` [-Wassert]"
-            ]
+        shouldWarn'
+            [ "void a(int b) { assert(some_function(b) == 1); }" ]
+            [[ "warning: non-pure function `some_function` cannot be called inside `assert()` [-Wassert]"
+             , "   --> test.c:1:17"
+             , "    |"
+             , "   1| void a(int b) { assert(some_function(b) == 1); }"
+             , "    |                 ^^^^^^"
+             ]]
 
     it "should not give diagnostics on complex pure expressions in assert" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "typedef struct Foo { int c[1]; } Foo;"
             , "void a(int b, Foo *b_ptr) { assert((b > 0) && (b < 10) || (b_ptr->c[0] == 42)); }"
             ]
-        analyseLocal ["assert"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should not give diagnostics on functions with no arguments" $ do
-        ast <- mustParse
-            [ "void a(int b) { assert(is_ready()); }"
-            ]
-        analyseLocal ["assert"] ("test.c", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void a(int b) { assert(is_ready()); }" ]

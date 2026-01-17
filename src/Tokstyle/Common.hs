@@ -1,17 +1,29 @@
-{-# LANGUAGE Strict #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE Strict           #-}
 module Tokstyle.Common
     ( functionName
     , isPointer
     , semEq
     , skip
+    , warn
+    , warnDoc
+    , backticks
+    , dquotes
     , (>+>)
     ) where
 
-import           Data.Fix        (Fix (..))
-import qualified Data.List       as List
-import           Data.Text       (Text)
-import           Language.Cimple (Lexeme (..), LexemeClass (..), Node,
-                                  NodeF (..), removeSloc)
+import           Data.Fix                      (Fix (..))
+import qualified Data.List                     as List
+import           Data.Text                     (Text)
+import           Language.Cimple               (Lexeme (..), LexemeClass (..),
+                                                Node, NodeF (..), removeSloc)
+import           Language.Cimple.Diagnostics   (CimplePos, Diagnostic (..),
+                                                DiagnosticLevel (..),
+                                                DiagnosticsT,
+                                                HasDiagnosticInfo (..),
+                                                HasDiagnosticsRich, warnRich)
+import           Prettyprinter                 (Doc, pretty)
+import           Prettyprinter.Render.Terminal (AnsiStyle)
 
 
 isPointer :: Node (Lexeme Text) -> Bool
@@ -50,6 +62,20 @@ semEq a b = removeSloc a == removeSloc b
 skip :: [FilePath] -> (FilePath, [Node (Lexeme Text)]) -> (FilePath, [Node (Lexeme Text)])
 skip fps (fp, _) | any (`List.isSuffixOf` fp) fps = (fp, [])
 skip _ tu        = tu
+
+warn :: (HasDiagnosticsRich diags CimplePos, HasDiagnosticInfo at CimplePos) => FilePath -> at -> Text -> DiagnosticsT diags ()
+warn file at msg = warnDoc file at (pretty msg)
+
+warnDoc :: (HasDiagnosticsRich diags CimplePos, HasDiagnosticInfo at CimplePos) => FilePath -> at -> Doc AnsiStyle -> DiagnosticsT diags ()
+warnDoc file at doc =
+    let (pos, len) = getDiagnosticInfo file at
+    in warnRich $ Diagnostic pos len WarningLevel doc Nothing [] []
+
+backticks :: Doc ann -> Doc ann
+backticks d = pretty '`' <> d <> pretty '`'
+
+dquotes :: Doc ann -> Doc ann
+dquotes d = pretty '"' <> d <> pretty '"'
 
 (>+>) :: Monad m => (t -> m ()) -> (t -> m ()) -> t -> m ()
 (>+>) f g x = f x >> g x

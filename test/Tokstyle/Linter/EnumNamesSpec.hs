@@ -1,67 +1,70 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.EnumNamesSpec where
+module Tokstyle.Linter.EnumNamesSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (allWarnings, analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["enum-names"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["enum-names"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid enum names" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "enum My_Enum {"
             , "  MY_ENUM_FOO,"
             , "  MY_ENUM_BAR"
             , "};"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid enum names" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "enum My_Enum {"
             , "  FOO,"
             , "  MY_ENUM_BAR"
             , "};"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: enumerator `FOO` in enum `My_Enum` should start with `MY_ENUM_` [-Wenum-names]"
-            ]
+            [[ "warning: enumerator `FOO` in enum `My_Enum` should start with `MY_ENUM_` [-Wenum-names]"
+             , "   --> test.c:2:3"
+             , "    |"
+             , "   2|   FOO,"
+             , "    |   ^^^"
+             ]]
 
     it "should handle _T suffix correctly" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "typedef enum My_Enum_T {"
             , "  MY_ENUM_FOO,"
             , "  MY_ENUM_BAR"
             , "} My_Enum_T;"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should not check exempted enums" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "enum Friend_Status {"
             , "  FRIEND_ONLINE,"
             , "  FRIEND_OFFLINE"
             , "};"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid enum names in typedef" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "typedef enum My_Enum {"
             , "  FOO,"
             , "  MY_ENUM_BAR"
             , "} My_Enum;"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: enumerator `FOO` in enum `My_Enum` should start with `MY_ENUM_` [-Wenum-names]"
-            ]
+            [[ "warning: enumerator `FOO` in enum `My_Enum` should start with `MY_ENUM_` [-Wenum-names]"
+             , "   --> test.c:2:3"
+             , "    |"
+             , "   2|   FOO,"
+             , "    |   ^^^"
+             ]]

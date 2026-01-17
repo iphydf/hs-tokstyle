@@ -12,9 +12,10 @@ import qualified Data.Text                   as Text
 import           Language.Cimple             (BinaryOp (..), Lexeme (..),
                                               LiteralType (..), Node,
                                               NodeF (..), lexemeText)
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Tokstyle.Common             (warn)
 
 
 pattern EqualsConst :: Lexeme Text -> Node (Lexeme Text)
@@ -57,7 +58,7 @@ shouldDiagnose cs branches =
     singleStatement _                        = False
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -73,10 +74,10 @@ linter = astActions
     }
 
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("switch-if", Text.unlines
     [ "Suggests turning sequences of `if`/`else` statements into `switch`, if there are"
     , "at least " <> Text.pack (show minSequence) <> " sequential if-conditions"

@@ -1,17 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.TaggedUnionSpec where
+module Tokstyle.Linter.TaggedUnionSpec (spec) where
 
-import           Test.Hspec          (Spec, describe, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, describe, it)
 
-import           Tokstyle.Linter     (analyseGlobal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["tagged-union"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["tagged-union"]
 
 
 spec :: Spec
 spec = do
     describe "Tagged union linter" $ do
         it "detects untagged unions with pointers" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef union Untagged {"
                 , "    char *ptr;"
                 , "    int i;"
@@ -20,13 +28,15 @@ spec = do
                 , "    Untagged u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:1: union `Untagged` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Untagged` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:1:15"
+                 , "    |"
+                 , "   1| typedef union Untagged {"
+                 , "    |               ^^^^^^^^^^"
+                 ]]
 
         it "accepts tagged unions" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -37,11 +47,9 @@ spec = do
                 , "    Tagged u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects unguarded access to tagged union member" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -55,13 +63,15 @@ spec = do
                 , "    char *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:11: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:11:21"
+                 , "    |"
+                 , "  11|     char *p = st->u.ptr;"
+                 , "    |                     ^^^"
+                 ]]
 
         it "accepts guarded access in if statement" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -77,11 +87,9 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "accepts guarded access in switch statement" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -98,11 +106,9 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects access with the WRONG tag check" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -118,13 +124,15 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:12: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
+                 , "   --> test.c:12:25"
+                 , "    |"
+                 , "  12|         char *p = st->u.ptr;"
+                 , "    |                         ^^^"
+                 ]]
 
         it "detects unguarded access even if another member is guarded (updated expectation)" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -140,13 +148,15 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:12: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
+                 , "   --> test.c:12:25"
+                 , "    |"
+                 , "  12|         char *p = st->u.ptr;"
+                 , "    |                         ^^^"
+                 ]]
 
         it "accepts assignment-based tagging for union creation" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -158,14 +168,12 @@ spec = do
                 , "};"
                 , "void test(struct My_Struct *st) {"
                 , "    st->tag = TAG_PTR;"
-                , "    st->u.ptr = nullptr;"
+                , "    st->u.ptr = 0;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects incorrect assignment-based tagging" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -177,16 +185,18 @@ spec = do
                 , "};"
                 , "void test(struct My_Struct *st) {"
                 , "    st->tag = TAG_INT;"
-                , "    st->u.ptr = nullptr;"
+                , "    st->u.ptr = 0;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:12: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
+                 , "   --> test.c:12:11"
+                 , "    |"
+                 , "  12|     st->u.ptr = 0;"
+                 , "    |           ^^^"
+                 ]]
 
         it "detects access with wrong tag after assignment" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -201,13 +211,15 @@ spec = do
                 , "    char *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:12: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `TAG_PTR` [-Wtagged-union]"
+                 , "   --> test.c:12:21"
+                 , "    |"
+                 , "  12|     char *p = st->u.ptr;"
+                 , "    |                     ^^^"
+                 ]]
 
         it "detects access before tag assignment" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -218,17 +230,19 @@ spec = do
                 , "    Tagged u;"
                 , "};"
                 , "void test(struct My_Struct *st) {"
-                , "    st->u.ptr = nullptr;"
+                , "    st->u.ptr = 0;"
                 , "    st->tag = TAG_PTR;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:11: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:11:11"
+                 , "    |"
+                 , "  11|     st->u.ptr = 0;"
+                 , "    |           ^^^"
+                 ]]
 
         it "detects enum members matching union members out of order" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_B, TAG_A } Tag;"
                 , "typedef union My_Union {"
                 , "    int a;"
@@ -239,14 +253,16 @@ spec = do
                 , "    My_Union u;"
                 , "};"
                 ]
-            -- Enum is B, A. Union is A, B. Order mismatch.
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:6: order of members in union `My_Union` should be changed to `b, a` to match enum `Tag` [-Wtagged-union]"
-                ]
+                -- Enum is B, A. Union is A, B. Order mismatch.
+                [[ "warning: order of members in union `My_Union` should be changed to `b, a` to match enum `Tag` [-Wtagged-union]"
+                 , "   --> test.c:6:8"
+                 , "    |"
+                 , "   6| struct My_Struct {"
+                 , "    |        ^^^^^^^^^^^"
+                 ]]
 
         it "detects unguarded access to truth member" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_A, TAG_B } Tag;"
                 , "typedef union Tagged {"
                 , "    char *a;"
@@ -260,13 +276,15 @@ spec = do
                 , "    if (st->u.a) { /* empty */ }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:11: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:11:15"
+                 , "    |"
+                 , "  11|     if (st->u.a) { /* empty */ }"
+                 , "    |               ^"
+                 ]]
 
         it "detects unguarded access to union member" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_A, TAG_B } Tag;"
                 , "typedef union Tagged {"
                 , "    char *a;"
@@ -281,14 +299,21 @@ spec = do
                 , "    st->u.a = (char*)1;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:11: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
-                , "test.c:12: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:11:21"
+                 , "    |"
+                 , "  11|     char *p = st->u.a;"
+                 , "    |                     ^"
+                 ]
+                ,[ "warning: access to union member `a` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:12:11"
+                 , "    |"
+                 , "  12|     st->u.a = (char*)1;"
+                 , "    |           ^"
+                 ]]
 
         it "detects out-of-order enum and union members" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_INT, TAG_PTR, TAG_UNUSED } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -299,13 +324,15 @@ spec = do
                 , "    Tagged u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:6: order of members in union `Tagged` should be changed to `i, ptr` to match enum `Tag` [-Wtagged-union]"
-                ]
+                [[ "warning: order of members in union `Tagged` should be changed to `i, ptr` to match enum `Tag` [-Wtagged-union]"
+                 , "   --> test.c:6:8"
+                 , "    |"
+                 , "   6| struct My_Struct {"
+                 , "    |        ^^^^^^^^^^^"
+                 ]]
 
         it "supports switch on struct member tag" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -319,17 +346,15 @@ spec = do
                 , "    st->tag = t;"
                 , "    switch (st->tag) {"
                 , "    case TAG_PTR: {"
-                , "        st->u.ptr = nullptr;"
+                , "        st->u.ptr = 0;"
                 , "        break;"
                 , "    }"
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "ignores unknown structs even if union member name matches" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -343,11 +368,9 @@ spec = do
                 , "    void *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "ignores known untagged structs even if union member name matches" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -364,11 +387,9 @@ spec = do
                 , "    void *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "handles logical AND in condition" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -379,16 +400,14 @@ spec = do
                 , "    Tagged u;"
                 , "};"
                 , "void test(struct My_Struct *st) {"
-                , "    if (st->tag == TAG_PTR && st->u.ptr != nullptr) {"
+                , "    if (st->tag == TAG_PTR && st->u.ptr != 0) {"
                 , "        void *p = st->u.ptr;"
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "handles logical OR in condition" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR1, TAG_PTR2, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -404,11 +423,9 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "handles early return" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -423,11 +440,9 @@ spec = do
                 , "    void *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects access when OR condition is partially unrelated" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -443,13 +458,15 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:12: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:12:25"
+                 , "    |"
+                 , "  12|         void *p = st->u.ptr;"
+                 , "    |                         ^^^"
+                 ]]
 
         it "supports guards in while loop condition" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -466,11 +483,9 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "supports guards in for loop condition" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -487,11 +502,9 @@ spec = do
                 , "    }"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects access after re-assignment to unknown value" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_PTR, TAG_INT } Tag;"
                 , "typedef union Tagged {"
                 , "    char *ptr;"
@@ -507,13 +520,15 @@ spec = do
                 , "    void *p = st->u.ptr;"
                 , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:13: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
-                ]
+                [[ "warning: access to union member `ptr` is not guarded by a check on `tag` [-Wtagged-union]"
+                 , "   --> test.c:13:21"
+                 , "    |"
+                 , "  13|     void *p = st->u.ptr;"
+                 , "    |                     ^^^"
+                 ]]
 
         it "exempts IP_Union" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef union IP4 { uint32_t u32; } IP4;"
                 , "typedef union IP6 { uint8_t u8[16]; } IP6;"
                 , "typedef union IP_Union {"
@@ -525,11 +540,9 @@ spec = do
                 , "    IP_Union ip;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "exempts compatible types (same size, no pointers)" $ do
-            ast <- mustParse
+            shouldAccept'
                 [ "typedef union Compatible_Union {"
                 , "    uint32_t u32;"
                 , "    uint16_t u16[2];"
@@ -539,11 +552,9 @@ spec = do
                 , "    Compatible_Union c;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe` []
 
         it "detects incompatible types (different sizes, no pointers)" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef union Incompatible_Union {"
                 , "    uint32_t u32;"
                 , "    uint64_t u64;"
@@ -552,13 +563,15 @@ spec = do
                 , "    Incompatible_Union i;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:1: union `Incompatible_Union` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Incompatible_Union` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:1:15"
+                 , "    |"
+                 , "   1| typedef union Incompatible_Union {"
+                 , "    |               ^^^^^^^^^^^^^^^^^^^^"
+                 ]]
 
         it "detects same-size pointers as incompatible (requiring tagging)" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef union Pointer_Union {"
                 , "    void *ptr1;"
                 , "    char *ptr2;"
@@ -567,13 +580,15 @@ spec = do
                 , "    Pointer_Union u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:1: union `Pointer_Union` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Pointer_Union` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:1:15"
+                 , "    |"
+                 , "   1| typedef union Pointer_Union {"
+                 , "    |               ^^^^^^^^^^^^^^^"
+                 ]]
 
         it "detects incompatible sizes (uint32_t, uint8_t[3])" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef union Incompatible_Size {"
                 , "    uint32_t u32;"
                 , "    uint8_t u8[3];"
@@ -582,13 +597,15 @@ spec = do
                 , "    Incompatible_Size i;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:1: union `Incompatible_Size` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Incompatible_Size` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:1:15"
+                 , "    |"
+                 , "   1| typedef union Incompatible_Size {"
+                 , "    |               ^^^^^^^^^^^^^^^^^^^"
+                 ]]
 
         it "detects same-size struct as incompatible (requiring tagging)" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef struct Small_Struct { uint32_t x; } Small_Struct;"
                 , "typedef union Same_Size_Union {"
                 , "    Small_Struct s;"
@@ -598,13 +615,15 @@ spec = do
                 , "    Same_Size_Union u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:2: union `Same_Size_Union` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Same_Size_Union` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:2:15"
+                 , "    |"
+                 , "   2| typedef union Same_Size_Union {"
+                 , "    |               ^^^^^^^^^^^^^^^^^"
+                 ]]
 
         it "detects void pointers in tagged unions" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum Tag { TAG_A, TAG_B } Tag;"
                 , "typedef union Tagged {"
                 , "    void *a;"
@@ -614,31 +633,21 @@ spec = do
                 , "    Tag tag;"
                 , "    Tagged u;"
                 , "};"
+                , "void test(struct My_Struct *st) {"
+                , "    if (st->tag == TAG_A) {"
+                , "        void *p = st->u.a;"
+                , "    }"
+                , "}"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:6: union `Tagged` contains a void pointer: `a` [-Wtagged-union]"
-                ]
-
-        it "detects void pointers even if used as truth member" $ do
-            ast <- mustParse
-                [ "typedef enum Tag { TAG_A, TAG_B } Tag;"
-                , "typedef union Tagged {"
-                , "    void *a;"
-                , "    int b;"
-                , "} Tagged;"
-                , "struct My_Struct {"
-                , "    Tag tag;"
-                , "    Tagged u;"
-                , "};"
-                ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:6: union `Tagged` contains a void pointer: `a` [-Wtagged-union]"
-                ]
+                [[ "warning: union `Tagged` contains a void pointer: `a` [-Wtagged-union]"
+                 , "   --> test.c:6:8"
+                 , "    |"
+                 , "   6| struct My_Struct {"
+                 , "    |        ^^^^^^^^^^^"
+                 ]]
 
         it "detects enum as incompatible (requiring tagging)" $ do
-            ast <- mustParse
+            shouldWarn'
                 [ "typedef enum My_Enum { VAL_A, VAL_B } My_Enum;"
                 , "typedef union Enum_Union {"
                 , "    My_Enum e;"
@@ -648,9 +657,11 @@ spec = do
                 , "    Enum_Union u;"
                 , "};"
                 ]
-            analyseGlobal ["tagged-union"] [("test.c", ast)]
-                `shouldBe`
-                [ "test.c:2: union `Enum_Union` must be tagged in a struct [-Wtagged-union]"
-                ]
+                [[ "warning: union `Enum_Union` must be tagged in a struct [-Wtagged-union]"
+                 , "   --> test.c:2:15"
+                 , "    |"
+                 , "   2| typedef union Enum_Union {"
+                 , "    |               ^^^^^^^^^^^^"
+                 ]]
 
 -- end of tests

@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Common.StructLinter
     ( MkFunBody
     , analyseStructs
@@ -15,20 +16,22 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LexemeClass (..),
                                               Node, NodeF (..))
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
-import           Language.Cimple.Pretty      (ppTranslationUnit, render)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
+import           Language.Cimple.Pretty      (ppTranslationUnit)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
-import           Tokstyle.Common             (semEq)
+import           Prettyprinter               (line, pretty)
+import           Tokstyle.Common             (semEq, warn, warnDoc)
 import qualified Tokstyle.Common.TypeSystem  as TypeSystem
 import           Tokstyle.Common.TypeSystem  (TypeDescr (..), TypeSystem)
 
 newtype Linter = Linter
-    { diags :: [Text]
+    { diags :: [Diagnostic CimplePos]
     }
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 empty :: Linter
 empty = Linter []
@@ -55,14 +58,14 @@ checkStructs tys funSuffix mkFunBody = traverseAst actions
                                     warn file node $ "invalid struct format for `" <> sname <> "`: " <> err
                                 Just (Right wanted) ->
                                     unless (body `semEq` wanted) $
-                                        warn file node $ "struct `" <> funSuffix <> "` function for `" <> sname <> "` should be:\n"
-                                            <> render (ppTranslationUnit [wanted])
+                                        warnDoc file node $ "struct `" <> pretty funSuffix <> "` function for `" <> pretty sname <> "` should be:" <> line
+                                            <> ppTranslationUnit [wanted]
                         _ -> return ()  -- not every _to_string function is for structs
 
                 _ -> act
         }
 
 
-analyseStructs :: Text -> MkFunBody -> [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyseStructs :: Text -> MkFunBody -> [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyseStructs funSuffix mkFunBody =
     reverse . diags . flip State.execState empty . (\tus -> checkStructs (TypeSystem.collect tus) funSuffix mkFunBody tus) . reverse

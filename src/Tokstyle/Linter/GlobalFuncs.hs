@@ -1,27 +1,31 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
 module Tokstyle.Linter.GlobalFuncs (descr) where
 
+import           Control.Monad.State.Strict  (State)
 import qualified Control.Monad.State.Strict  as State
 import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..),
                                               Scope (..), lexemeText)
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
+import           Prettyprinter               (pretty, (<+>))
 import           System.FilePath             (takeExtension)
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse (file, _) | takeExtension file /= ".c" = []
 analyse (file, ast) = reverse $ State.execState (mapM go ast) []
   where
     go (Fix (FunctionDecl Global (Fix (FunctionPrototype _ name _)))) =
-        warn file name $
-            "global function `" <> lexemeText name <> "` declared in .c file"
+        warnDoc file name $
+            "global function" <+> backticks (pretty (lexemeText name)) <+> "declared in .c file"
     go _ = return ()
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("global-funcs", Text.unlines
     [ "Checks that no extern functions are declared in .c files."
     , ""

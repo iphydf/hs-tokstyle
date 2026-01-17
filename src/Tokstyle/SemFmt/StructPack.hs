@@ -12,6 +12,7 @@ import           Language.Cimple              (BinaryOp (..), Lexeme (..),
                                                LexemeClass (..),
                                                LiteralType (..), Node,
                                                NodeF (..), UnaryOp (..))
+import           Language.Cimple.Diagnostics  (CimplePos, Diagnostic)
 import           Tokstyle.Common.StructLinter (MkFunBody, analyseStructs, mkLAt)
 import           Tokstyle.Common.TypeSystem   (StdType (..), TypeDescr (..),
                                                TypeInfo (..), TypeRef (..))
@@ -116,10 +117,10 @@ mkPackMember varName (memName, memType) = do
                 ])
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = analyseStructs funSuffix mkFunBody
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("struct-pack", Text.unlines
     [ "Checks that `_pack` functions for `struct`s are complete and correct."
     , ""

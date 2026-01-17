@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Linter.DeclaredOnce (descr) where
 
 import           Control.Monad.State.Strict  (State)
@@ -12,21 +13,24 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LexemeClass (..),
                                               Node, NodeF (..))
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data Linter = Linter
-    { diags :: [Text]
+    { diags :: [Diagnostic CimplePos]
     , decls :: Map Text (FilePath, Lexeme Text)
     }
 
 empty :: Linter
 empty = Linter [] Map.empty
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 
 linter :: AstActions (State Linter) Text
@@ -38,17 +42,17 @@ linter = astActions
                 case Map.lookup fname decls of
                     Nothing -> State.put l{decls = Map.insert fname (file, fn) decls }
                     Just (file', fn') -> do
-                        warn file' fn' $ "duplicate declaration of function `" <> fname <> "`"
-                        warn file fn $ "function `" <> fname <> "` also declared here"
+                        warnDoc file' fn' $ "duplicate declaration of function" <+> backticks (pretty fname)
+                        warnDoc file fn $ "function" <+> backticks (pretty fname) <+> "also declared here"
 
             FunctionDefn{} -> pure ()
             _ -> act
     }
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse tus = reverse . diags $ State.execState (traverseAst linter tus) empty
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("declared-once", Text.unlines
     [ "Checks that any function is declared exactly once."
     , ""

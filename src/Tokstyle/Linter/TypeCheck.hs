@@ -27,9 +27,12 @@ import           Language.Cimple             (AssignOp (..), BinaryOp (..),
                                               NodeF (..), UnaryOp (..),
                                               lexemeText)
 import qualified Language.Cimple             as C
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              DiagnosticLevel (..))
+import qualified Language.Cimple.Diagnostics as Diagnostics
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty)
 
 -- | The core type system of our linter. It's a Hindley-Milner style type system.
 data Type
@@ -152,7 +155,7 @@ data LinterState = LinterState
     }
 
 -- | The linter monad.
-type LinterM a = StateT LinterState (State [Text]) a
+type LinterM a = StateT LinterState (State [Diagnostic CimplePos]) a
 
 -- | A local error handler.
 catchError :: LinterM a -> (Text -> LinterM a) -> LinterM a
@@ -161,7 +164,7 @@ catchError action handler = do
     let res = runState (evalStateT action st) []
     case res of
         (val, []) -> return val
-        (_, errs) -> handler (Text.unlines errs)
+        (_, errs) -> handler (Text.unlines (map (Text.pack . show . Diagnostics.diagMsg) errs))
 
 
 -- Monad Helpers
@@ -175,10 +178,11 @@ fresh = do
     return $ TVar (TV i)
 
 -- | Add a type error to the list of diagnostics.
-addError :: HasLocation a => a -> Text -> LinterM ()
+addError :: (Diagnostics.HasDiagnosticInfo a CimplePos) => a -> Text -> LinterM ()
 addError loc msg = do
     file <- gets currentFile
-    lift $ warn file loc msg
+    let (pos, len) = Diagnostics.getDiagnosticInfo file loc
+    lift $ Diagnostics.warnRich $ Diagnostics.Diagnostic pos len WarningLevel (pretty msg) Nothing [] []
 
 -- | Run a computation in a modified type environment.
 withEnv :: (TypeEnv -> TypeEnv) -> LinterM a -> LinterM a
@@ -196,7 +200,7 @@ composeSubst :: Subst -> Subst -> Subst
 composeSubst s1 s2 = Map.map (apply s1) s2 `Map.union` s1
 
 -- | Unify two types.
-unify :: HasLocation a => a -> Text -> Type -> Type -> LinterM ()
+unify :: (Diagnostics.HasDiagnosticInfo a CimplePos) => a -> Text -> Type -> Type -> LinterM ()
 unify loc context t1 t2 = do
     s <- gets subst
     rT1 <- resolveType (apply s t1)
@@ -233,7 +237,7 @@ unify loc context t1 t2 = do
         _ -> addError loc $ "type mismatch in " <> context <> ": expected " <> Text.pack (show rT1) <> ", but got " <> Text.pack (show rT2)
 
 -- | Unify a type variable with a type.
-unifyVar :: HasLocation a => a -> Text -> TVar -> Type -> LinterM ()
+unifyVar :: (Diagnostics.HasDiagnosticInfo a CimplePos) => a -> Text -> TVar -> Type -> LinterM ()
 unifyVar loc context a t = do
     s <- gets subst
     if | Just t' <- Map.lookup a s -> unify loc context t' t
@@ -401,7 +405,7 @@ inferExpr n@(Fix node) = case node of
         fType <- inferExpr f
         argTypes <- mapM inferExpr args
         retType <- fresh
-        unify f "function call" fType (TFunc argTypes retType False)
+        unify n "function call" fType (TFunc argTypes retType False)
         return retType
     C.PointerAccess e l@(L _ _ member) -> do
         eType <- inferExpr e
@@ -410,24 +414,24 @@ inferExpr n@(Fix node) = case node of
             TPointer (TStruct name fields) ->
                 case Map.lookup member fields of
                     Just memberType -> return memberType
-                    Nothing -> addError l ("Struct " <> name <> " has no member: " <> member) >> fresh
+                    Nothing -> addError n ("Struct " <> name <> " has no member: " <> member) >> fresh
             TPointer (TUnion name fields) ->
                 case Map.lookup member fields of
                     Just memberType -> return memberType
-                    Nothing -> addError l ("Union " <> name <> " has no member: " <> member) >> fresh
+                    Nothing -> addError n ("Union " <> name <> " has no member: " <> member) >> fresh
             TPointer (TUserDefined name) -> do
                 senv <- gets structEnv
                 case Map.lookup name senv of
                     Just fields -> case Map.lookup member fields of
                         Just memberType -> return memberType
-                        Nothing -> addError l ("Struct " <> name <> " has no member: " <> member) >> fresh
+                        Nothing -> addError n ("Struct " <> name <> " has no member: " <> member) >> fresh
                     Nothing -> do
                         uenv <- gets unionEnv
                         case Map.lookup name uenv of
                             Just ufields -> case Map.lookup member ufields of
                                 Just memberType -> return memberType
-                                Nothing -> addError l ("Union " <> name <> " has no member: " <> member) >> fresh
-                            Nothing -> addError e ("Accessing member of incomplete type: " <> name) >> fresh
+                                Nothing -> addError n ("Union " <> name <> " has no member: " <> member) >> fresh
+                            Nothing -> addError n ("Accessing member of incomplete type: " <> name) >> fresh
             TPointer (TVar _) -> do
                 memberType <- fresh
                 let fields = Map.singleton member memberType
@@ -441,11 +445,11 @@ inferExpr n@(Fix node) = case node of
             TStruct name fields ->
                 case Map.lookup member fields of
                     Just memberType -> return memberType
-                    Nothing -> addError l ("Struct " <> name <> " has no member: " <> member) >> fresh
+                    Nothing -> addError n ("Struct " <> name <> " has no member: " <> member) >> fresh
             TUnion name fields ->
                 case Map.lookup member fields of
                     Just memberType -> return memberType
-                    Nothing -> addError l ("Union " <> name <> " has no member: " <> member) >> fresh
+                    Nothing -> addError n ("Union " <> name <> " has no member: " <> member) >> fresh
             TUserDefined name -> do
                 senv <- gets structEnv
                 case Map.lookup name senv of
@@ -717,7 +721,7 @@ collectGlobals (file, nodes) = do
                         _ -> return []
                     let fieldEnv = Map.fromList memberDecls
                     modify $ \s -> s { unionEnv = Map.insert uname fieldEnv (unionEnv s) }
-                C.Typedef (Fix (C.Struct (L _ _ sname) members)) (L _ _ tname) -> do
+                C.Typedef (Fix (C.Struct (L _ _ sname) members)) (L _ _ tname) _ -> do
                     memberDecls <- fmap concat . forM members $ \case
                         Fix (C.MemberDecl (Fix (C.VarDecl ty (L _ _ mname) declSpecArrays)) _) -> do
                             t <- cimpleToType ty
@@ -727,7 +731,7 @@ collectGlobals (file, nodes) = do
                     let fieldEnv = Map.fromList memberDecls
                     modify $ \s -> s { structEnv = Map.insert sname fieldEnv (structEnv s) }
                     modify $ \s -> s { typedefEnv = Map.insert tname (TStruct sname fieldEnv) (typedefEnv s) }
-                C.Typedef (Fix (C.Union (L _ _ uname) members)) (L _ _ tname) -> do
+                C.Typedef (Fix (C.Union (L _ _ uname) members)) (L _ _ tname) _ -> do
                     memberDecls <- fmap concat . forM members $ \case
                         Fix (C.MemberDecl (Fix (C.VarDecl ty (L _ _ mname) declSpecArrays)) _) -> do
                             t <- cimpleToType ty
@@ -737,7 +741,7 @@ collectGlobals (file, nodes) = do
                     let fieldEnv = Map.fromList memberDecls
                     modify $ \s -> s { unionEnv = Map.insert uname fieldEnv (unionEnv s) }
                     modify $ \s -> s { typedefEnv = Map.insert tname (TUnion uname fieldEnv) (typedefEnv s) }
-                C.Typedef (Fix (C.EnumDecl _ enumerators (L _ _ tname))) (L _ _ _) -> do
+                C.Typedef (Fix (C.EnumDecl _ enumerators (L _ _ tname))) (L _ _ _) _ -> do
                     let enumType = TInt
                     modify $ \s -> s { typedefEnv = Map.insert tname enumType (typedefEnv s) }
                     forM_ enumerators $ \e -> handleEnumerator enumType e
@@ -754,7 +758,7 @@ collectGlobals (file, nodes) = do
                         _                      -> fresh
                     let ftype = TFunc param_ts ret_t isVariadic
                     modify $ \s -> s { typedefEnv = Map.insert tname ftype (typedefEnv s) }
-                C.Typedef ty (L _ _ name) -> do
+                C.Typedef ty (L _ _ name) _ -> do
                     t <- cimpleToType ty
                     modify $ \s -> s { typedefEnv = Map.insert name t (typedefEnv s) }
                 C.EnumDecl _ enumerators (L _ _ name) -> do
@@ -860,7 +864,7 @@ typeCheckFunc _ _ = return ()
 -- Linter Entry
 
 -- | The main analysis function.
-analyse :: [TranslationUnit] -> [Text]
+analyse :: [TranslationUnit] -> [Diagnostic CimplePos]
 analyse tus =
     let
         initialState = LinterState Map.empty Map.empty Map.empty Map.empty Map.empty 0 ""
@@ -870,7 +874,7 @@ analyse tus =
     in
         reverse $ snd $ runState (evalStateT linterM initialState) []
 
-descr :: ([TranslationUnit] -> [Text], (Text, Text))
+descr :: ([TranslationUnit] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("type-check", Text.unlines
     [ "A Hindley-Milner based type checker for Cimple."
     , "It checks for type consistency in expressions, assignments, and function calls."

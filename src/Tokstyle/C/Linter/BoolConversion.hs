@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.BoolConversion (analyse) where
+module Tokstyle.C.Linter.BoolConversion (descr) where
 
 import           Data.Functor.Identity           (Identity)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemRep      (GlobalDecls, IntType (..),
                                                   Type (..), TypeDefRef (..),
@@ -13,11 +14,12 @@ import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CBinaryOp (..), CExpr,
                                                   CExpression (..),
                                                   CUnaryOp (..), annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 checkBoolConversion :: CExpr -> TravT Env Identity ()
 checkBoolConversion expr = do
@@ -27,7 +29,7 @@ checkBoolConversion expr = do
         TypeDefType (TypeDefRef (Ident "bool" _ _) _ _) _ _ -> return ()
         PtrType _ _ _ ->
             recordLinterError (annotation expr) $
-                "implicit conversion from " <> pretty (show (C.pretty ty)) <> " to bool"
+                "implicit conversion from" <+> backticks (pretty (show (C.pretty ty))) <+> "to bool"
         _ -> return ()
 
 
@@ -55,3 +57,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("bool-conversion", "Checks for implicit conversions to bool."))

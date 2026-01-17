@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Linter.EnumDefines (descr) where
 
 import           Control.Monad               (when)
@@ -11,12 +12,15 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LiteralType (..),
                                               Node, NodeF (..))
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
 import           Text.Casing                 (fromHumps, fromSnake, toPascal,
                                               toSnake, unIdentifier)
 import           Text.Read                   (readMaybe)
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 -- | A sequence of #defines must be at least this long before we think it
@@ -36,12 +40,12 @@ maxSmallInt :: Int
 maxSmallInt = 0xff
 
 data Linter = Linter
-    { diags :: [Text]
+    { diags :: [Diagnostic CimplePos]
     , defs  :: [Text]
     }
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 empty :: Linter
 empty = Linter [] []
@@ -69,8 +73,8 @@ checkEnumDefs file node = do
     let cp = commonPrefix $ map Text.unpack defs
     -- Warn exactly once (hence == instead of >=).
     when (length defs == minSequence && numComponents cp >= minComponents) $
-        warn file node $ "sequence of `#define`s longer than " <> Text.pack (show minSequence)
-            <> " could be written as `enum " <> toEnumName cp <> "`"
+        warnDoc file node $ "sequence of `#define`s longer than" <+> pretty minSequence
+            <+> "could be written as" <+> backticks ("enum" <+> pretty (toEnumName cp))
 
   where
     numComponents = length . unIdentifier . fromSnake
@@ -102,10 +106,10 @@ linter = astActions
                 State.modify clearDefs
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . diags . flip State.execState empty . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("enum-defines", Text.unlines
     [ "Suggests using `enum` instead of a sequence of `#define`s for enumerations."
     , "Only matches sequences of `#define`s longer than " <> Text.pack (show minSequence)

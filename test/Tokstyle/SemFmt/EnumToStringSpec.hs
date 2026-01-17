@@ -1,31 +1,43 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Tokstyle.SemFmt.EnumToStringSpec where
+import           Data.Text              (Text)
+import qualified Data.Text              as Text
+import           Test.Hspec             (Spec, it)
 
-import           Test.Hspec             (Spec, it, shouldBe)
+import           Language.Cimple.Pretty (plain, ppTranslationUnit, render)
+import           Tokstyle.LinterSpec    (mustParseStmt, shouldAccept,
+                                         shouldWarn)
 
-import           Language.Cimple.Pretty (ppTranslationUnit, render)
 
-import           Tokstyle.Linter        (analyseGlobal)
-import           Tokstyle.LinterSpec    (mustParse, mustParseStmt)
+shouldWarn' :: [(FilePath, [Text])] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarn ["enum-to-string"]
+
+
+shouldAccept' :: [(FilePath, [Text])] -> IO ()
+shouldAccept' = shouldAccept ["enum-to-string"]
+
+
+testC :: [Text] -> [(FilePath, [Text])]
+testC code = [("test.c", code)]
 
 
 spec :: Spec
 spec = do
     it "should give diagnostics on incorrect to_string function" $ do
-        ast <- mustParse
-            [ "typedef enum Foo {"
-            , "  FOO_ONE,"
-            , "  FOO_TWO,"
-            , "} Foo;"
-            , "const char *foo_to_string(Foo value) {"
-            , "  switch (value) {"
-            , "    case FOO_ONE: return \"FOO_ONE\";"
-            , "    case FOO_TWO: return \"FOO_ONE\";"
-            , "  }"
-            , "  return \"<invalid>\";"
-            , "}"
-            ]
-        expected <- render . ppTranslationUnit . (:[]) <$> mustParseStmt
+        let code =
+                [ "typedef enum Foo {"
+                , "  FOO_ONE,"
+                , "  FOO_TWO,"
+                , "} Foo;"
+                , "const char *foo_to_string(Foo value) {"
+                , "  switch (value) {"
+                , "    case FOO_ONE: return \"FOO_ONE\";"
+                , "    case FOO_TWO: return \"FOO_ONE\";"
+                , "  }"
+                , "  return \"<invalid>\";"
+                , "}"
+                ]
+        expectedLines <- Text.lines . render . plain . ppTranslationUnit . (:[]) <$> mustParseStmt
             [ "{"
             , "  switch (value) {"
             , "    case FOO_ONE: return \"FOO_ONE\";"
@@ -34,8 +46,12 @@ spec = do
             , "  return \"<invalid Foo>\";"
             , "}"
             ]
-        analyseGlobal ["enum-to-string"] [("test.c", ast)]
-            `shouldBe`
-            [ "test.c:5: enum `_to_string` function for `Foo` should be:\n"
-              <> expected <> " [-Wenum-to-string]"
-            ]
+        let indent l = if Text.null (Text.strip l) then "" else "         " <> l
+        shouldWarn' (testC code)
+            [[ "warning: enum `_to_string` function for `Foo` should be: [-Wenum-to-string]"
+                , Text.intercalate "\n" $ map indent expectedLines
+                , "   --> test.c:5:7"
+                , "    |"
+                , "   5| const char *foo_to_string(Foo value) {"
+                , "    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+                ]]

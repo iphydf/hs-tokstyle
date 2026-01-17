@@ -4,24 +4,51 @@ module Main (main) where
 
 import           Control.Monad                 (unless)
 import qualified Control.Monad.Parallel        as Par
-import           Data.List                     (find, isPrefixOf, partition)
-import qualified Data.Maybe                    as Maybe
+import           Data.List                     (isPrefixOf)
 import           Data.Text                     (Text)
 import qualified Data.Text                     as Text
 import qualified Data.Text.IO                  as Text
-import qualified Data.Text.Lazy.IO             as TLIO
 import           Language.C                    (parseCFile)
 import           Language.C.System.GCC         (newGCC)
+import           Options.Applicative
 import           Prettyprinter                 (Doc, defaultLayoutOptions,
                                                 layoutSmart, pretty)
 import           Prettyprinter.Render.Terminal (AnsiStyle, renderIO)
-import           Prettyprinter.Render.Text     (renderLazy)
-import           System.Environment            (getArgs)
 import           System.Exit                   (ExitCode (..), exitWith)
 import           System.IO                     (hSetEncoding, stderr, stdout,
                                                 utf8)
 import qualified Tokstyle.C.Linter             as Linter
 import           Tokstyle.C.Linter             (allWarnings, analyse)
+
+
+data Options = Options
+    { optCC         :: String
+    , optInclude    :: String
+    , optMarkdown   :: Bool
+    , optWarnings   :: [Text]
+    , optCppOptions :: [String]
+    , optFiles      :: [FilePath]
+    }
+
+
+parseOptions :: [Text] -> Parser Options
+parseOptions allW = Options
+    <$> strOption (long "cc" <> metavar "CC" <> value "clang" <> help "C compiler to use")
+    <*> strOption (long "include" <> metavar "DIR" <> value "/src/workspace/hs-tokstyle/include" <> help "System include directory")
+    <*> switch (long "markdown" <> help "Output documentation in Markdown format")
+    <*> (processFlags . map Text.pack <$> many (strOption (short 'W' <> metavar "WARNING" <> help "Enable/disable warnings")))
+    <*> many ( (("-D" ++) <$> strOption (short 'D' <> metavar "MACRO" <> help "CPP macro definition"))
+           <|> (("-I" ++) <$> strOption (short 'I' <> metavar "DIR" <> help "CPP include directory"))
+           <|> (("-U" ++) <$> strOption (short 'U' <> metavar "MACRO" <> help "CPP undefine macro")) )
+    <*> many (argument str (metavar "FILES..."))
+  where
+    processFlags flags =
+        let stripped = map Text.unpack flags
+            initial = if any (not . ("no-" `isPrefixOf`)) stripped then [] else allW
+        in foldl (flip processFlag) initial stripped
+
+    processFlag ('n':'o':'-':f) = filter (/= Text.pack f)
+    processFlag f               = (Text.pack f :)
 
 
 defaultCppOpts :: String -> [String]
@@ -52,27 +79,12 @@ main :: IO ()
 main = do
     hSetEncoding stdout utf8
     hSetEncoding stderr utf8
-    args <- getArgs
-    let (opts, rest) = partition (isPrefixOf "--") args
-    let (restOpts, files) = partition (isPrefixOf "-") rest
-    let (linterOpts, cppOpts) = partition (isPrefixOf "-W") restOpts
-    let flags = processFlags linterOpts
-    let cc = Maybe.fromMaybe "clang" $ getFlag "--cc=" opts
-    let sysInclude = Maybe.fromMaybe "/src/workspace/hs-tokstyle/include" $ getFlag "--include=" opts
-    result <- Par.mapM (processFile cc sysInclude flags cppOpts) files
-    mapM_ (mapM_ render . snd) result
-    unless (all fst result) $ exitWith (ExitFailure 1)
+    opts <- execParser $ info (parseOptions allWarnings <**> helper) fullDesc
+    if optMarkdown opts
+        then Text.putStr Linter.markdown
+        else do
+            result <- Par.mapM (processFile (optCC opts) (optInclude opts) (optWarnings opts) (optCppOptions opts)) (optFiles opts)
+            mapM_ (mapM_ render . snd) result
+            unless (all fst result) $ exitWith (ExitFailure 1)
   where
-    getFlag flag = fmap (drop $ length flag) . find (isPrefixOf flag)
-
     render doc = renderIO stderr (layoutSmart defaultLayoutOptions doc) >> Text.hPutStrLn stderr ""
-
-    processFlags :: [String] -> [Text]
-    processFlags flags =
-        let stripped = map (drop 2) flags
-            initial = if any (not . ("no-" `isPrefixOf`)) stripped then [] else allWarnings
-        in foldr processFlag initial . reverse $ stripped
-
-    processFlag :: String -> [Text] -> [Text]
-    processFlag ('n':'o':'-':flag) = filter (/= Text.pack flag)
-    processFlag flag               = (Text.pack flag :)

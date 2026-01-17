@@ -1,29 +1,35 @@
-genrule(
-    name = "cimple_doc",
-    outs = ["cimple.md.new"],
-    cmd = "$(location //hs-tokstyle/tools:check-cimple) --help > $@",
+[genrule(
+    name = "%s_doc" % lang,
+    outs = ["%s.md.new" % lang],
+    cmd = "$(location //hs-tokstyle/tools:check-%s) --markdown > $@" % lang,
     tags = [
         "haskell",
         "no-cross",
     ],
-    tools = ["//hs-tokstyle/tools:check-cimple"],
-)
+    tools = ["//hs-tokstyle/tools:check-%s" % lang],
+) for lang in [
+    "c",
+    "cimple",
+]]
 
-sh_test(
-    name = "cimple_doc_test",
+[sh_test(
+    name = "%s_doc_test" % lang,
     size = "small",
     srcs = ["@diffutils//:diff"],
     args = [
         "-u",
-        "$(location cimple.md)",
-        "$(location cimple.md.new)",
+        "$(location %s.md)" % lang,
+        "$(location %s.md.new)" % lang,
     ],
     data = [
-        "cimple.md",
-        "cimple.md.new",
+        "%s.md" % lang,
+        "%s.md.new" % lang,
     ],
     tags = [
         "haskell",
         "no-cross",
     ],
-)
+) for lang in [
+    "c",
+    "cimple",
+]]

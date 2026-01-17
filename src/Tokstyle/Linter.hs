@@ -6,8 +6,12 @@ module Tokstyle.Linter
     ( analyse
     , analyseLocal
     , analyseGlobal
+    , analyseText
+    , analyseLocalText
+    , analyseGlobalText
     , allWarnings
     , markdown
+    , diagToText
     ) where
 
 import           Control.Parallel.Strategies      (parMap, rpar)
@@ -15,6 +19,8 @@ import qualified Data.List                        as List
 import           Data.Text                        (Text)
 import qualified Data.Text                        as Text
 import           Language.Cimple                  (Lexeme, Node)
+import           Language.Cimple.Diagnostics      (CimplePos, Diagnostic (..),
+                                                   diagToText)
 
 import qualified Tokstyle.Linter.Assert           as Assert
 import qualified Tokstyle.Linter.BooleanReturn    as BooleanReturn
@@ -58,13 +64,13 @@ import qualified Tokstyle.SemFmt.StructPack       as StructPack
 
 type TranslationUnit = (FilePath, [Node (Lexeme Text)])
 
-run :: [(t -> [Text], (Text, Text))] -> [Text] -> t -> [Text]
+run :: [(t -> [Diagnostic CimplePos], (Text, Text))] -> [Text] -> t -> [Diagnostic CimplePos]
 run linters flags tu =
     concat . parMap rpar apply . filter ((`elem` flags) . fst . snd) $ linters
   where
-    apply (f, (flag, _)) = map (<> " [-W" <> flag <> "]") $ f tu
+    apply (f, (flag, _)) = map (\d -> d{diagFlag = Just flag}) $ f tu
 
-type LocalLinter = (TranslationUnit -> [Text], (Text, Text))
+type LocalLinter = (TranslationUnit -> [Diagnostic CimplePos], (Text, Text))
 
 localLinters :: [LocalLinter]
 localLinters =
@@ -88,7 +94,6 @@ localLinters =
     , MallocType.descr
     , MemcpyStructs.descr
     , Nesting.descr
-    , Nullability.descr
     , Parens.descr
     , SwitchIf.descr
     , TypedefName.descr
@@ -96,7 +101,7 @@ localLinters =
     , VarUnusedInScope.descr
     ]
 
-type GlobalLinter = ([TranslationUnit] -> [Text], (Text, Text))
+type GlobalLinter = ([TranslationUnit] -> [Diagnostic CimplePos], (Text, Text))
 
 globalLinters :: [GlobalLinter]
 globalLinters =
@@ -104,6 +109,7 @@ globalLinters =
     , DeclaredOnce.descr
     , DeclsHaveDefns.descr
     , DocComments.descr
+    , Nullability.descr
     , OwnershipDecls.descr
     , TypeCheck.descr
     , TaggedUnion.descr
@@ -114,11 +120,17 @@ globalLinters =
     , StructPack.descr
     ]
 
-analyseLocal :: [Text] -> TranslationUnit -> [Text]
+analyseLocal :: [Text] -> TranslationUnit -> [Diagnostic CimplePos]
 analyseLocal = run localLinters
 
-analyseGlobal :: [Text] -> [TranslationUnit] -> [Text]
+analyseLocalText :: [Text] -> TranslationUnit -> [Text]
+analyseLocalText flags tu = map diagToText (analyseLocal flags tu)
+
+analyseGlobal :: [Text] -> [TranslationUnit] -> [Diagnostic CimplePos]
 analyseGlobal linters tus = run globalLinters linters (sortTUs tus)
+
+analyseGlobalText :: [Text] -> [TranslationUnit] -> [Text]
+analyseGlobalText flags tus = map diagToText (analyseGlobal flags tus)
 
 sortTUs :: [TranslationUnit] -> [TranslationUnit]
 sortTUs = List.sortBy compareTUs
@@ -129,8 +141,11 @@ sortTUs = List.sortBy compareTUs
             (False, True) -> GT
             _             -> compare fp1 fp2
 
-analyse :: [Text] -> [TranslationUnit] -> [Text]
+analyse :: [Text] -> [TranslationUnit] -> [Diagnostic CimplePos]
 analyse linters tus = concat $ analyseGlobal linters tus : parMap rpar (analyseLocal linters) tus
+
+analyseText :: [Text] -> [TranslationUnit] -> [Text]
+analyseText flags tus = map diagToText (analyse flags tus)
 
 allWarnings :: [Text]
 allWarnings = map (fst . snd) localLinters ++ map (fst . snd) globalLinters
@@ -154,4 +169,4 @@ markdown = Text.intercalate "\n" . (prelude ++) . map snd . List.sort $ map mkDo
         ]
     mkDoc lnt =
         let (flag, doc) = snd lnt in
-        (flag, "## `-W" <> flag <> "`" <> linterType lnt <> "\n\n" <> doc)
+        (flag, "## `-W" <> flag <> "`" <> linterType lnt <> "\n\n" <> Text.stripEnd doc <> "\n")

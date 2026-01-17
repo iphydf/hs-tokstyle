@@ -10,17 +10,19 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (BinaryOp (BopMul), Lexeme (..),
                                               Node, NodeF (..), Scope (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
 import qualified Tokstyle.Common             as Common
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 import           Tokstyle.Common.Patterns
 
 
-checkSize, checkNmemb :: Text -> FilePath -> Node (Lexeme Text) -> State [Text] ()
+checkSize, checkNmemb :: Text -> FilePath -> Node (Lexeme Text) -> State [Diagnostic CimplePos] ()
 checkSize funName file size = case unFix size of
     SizeofType{} -> return ()
-    _ -> warn file size $ "`size` argument in call to `" <> funName <> "` must be a sizeof expression"
+    _ -> warnDoc file size $ backticks "size" <+> "argument in call to" <+> backticks (pretty funName) <+> "must be a sizeof expression"
 
 checkNmemb funName file nmemb = case unFix nmemb of
     LiteralExpr{}     -> return ()
@@ -32,16 +34,16 @@ checkNmemb funName file nmemb = case unFix nmemb of
         checkNmemb funName file r
 
     SizeofType{} ->
-        warn file nmemb $ "`sizeof` should not appear in the `nmemb` argument to `" <> funName <> "`"
+        warnDoc file nmemb $ backticks "sizeof" <+> "should not appear in the" <+> backticks "nmemb" <+> "argument to" <+> backticks (pretty funName)
 
     _ ->
-        warn file nmemb $ "invalid expression in `nmemb` argument to `" <> funName <> "`"
+        warnDoc file nmemb $ "invalid expression in" <+> backticks "nmemb" <+> "argument to" <+> backticks (pretty funName)
 
 
 pattern Calloc :: Text -> [Node (Lexeme Text)] -> Node (Lexeme Text)
 pattern Calloc funName args <- Fix (FunctionCall (Fix (VarExpr (L _ _ funName))) args)
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act -> case node of
         Calloc funName@"calloc" [nmemb, size] -> do
@@ -59,11 +61,11 @@ linter = astActions
             checkNmemb funName file nmemb
             checkSize funName file size
 
-        Calloc "calloc"       _ -> warn file node "invalid `calloc` invocation: 2 arguments expected"
-        Calloc "realloc"      _ -> warn file node "invalid `realloc` invocation: 2 arguments expected"
-        Calloc "mem_alloc"    _ -> warn file node "invalid `mem_alloc` invocation: 1 argument after `mem` expected"
-        Calloc "mem_valloc"   _ -> warn file node "invalid `mem_valloc` invocation: 2 arguments after `mem` expected"
-        Calloc "mem_vrealloc" _ -> warn file node "invalid `mem_vrealloc` invocation: 3 argument after `mem` expected"
+        Calloc "calloc"       _ -> warnDoc file node $ "invalid" <+> backticks "calloc" <+> "invocation: 2 arguments expected"
+        Calloc "realloc"      _ -> warnDoc file node $ "invalid" <+> backticks "realloc" <+> "invocation: 2 arguments expected"
+        Calloc "mem_alloc"    _ -> warnDoc file node $ "invalid" <+> backticks "mem_alloc" <+> "invocation: 1 argument after" <+> backticks "mem" <+> "expected"
+        Calloc "mem_valloc"   _ -> warnDoc file node $ "invalid" <+> backticks "mem_valloc" <+> "invocation: 2 arguments after" <+> backticks "mem" <+> "expected"
+        Calloc "mem_vrealloc" _ -> warnDoc file node $ "invalid" <+> backticks "mem_vrealloc" <+> "invocation: 3 argument after" <+> backticks "mem" <+> "expected"
 
         Fix (FunctionDefn Static (Fix (FunctionPrototype TY_void_ptr _ _)) _) ->
             -- Ignore static functions returning void pointers. These are allocator
@@ -73,7 +75,7 @@ linter = astActions
         _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter . Common.skip
     [ "toxav/rtp.c"
     , "toxcore/list.c"
@@ -81,7 +83,7 @@ analyse = reverse . flip State.execState [] . traverseAst linter . Common.skip
     , "toxcore/os_memory.c"
     ]
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("calloc-args", Text.unlines
     [ "Checks that `mem_alloc`, `mem_valloc`, and `mem_vrealloc` are used correctly:"
     , ""

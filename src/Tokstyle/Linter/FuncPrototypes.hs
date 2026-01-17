@@ -8,27 +8,28 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme, Node, NodeF (..))
-import qualified Language.Cimple.Diagnostics as Diagnostics
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Tokstyle.Common             (warn)
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
             FunctionPrototype _ name [] -> do
-                Diagnostics.warn file name "empty parameter list must be written as `(void)`"
+                warn file name "empty parameter list must be written as `(void)`"
                 act
 
             FunctionDefn{} -> return ()
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("func-prototypes", Text.unlines
     [ "Checks that empty parameter lists in C functions are written as `(void)`."
     , ""

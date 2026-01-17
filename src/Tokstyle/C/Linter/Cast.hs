@@ -1,10 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.Cast (analyse) where
+module Tokstyle.C.Linter.Cast (descr) where
 
 import           Control.Monad                   (unless, zipWithM_)
 import           Data.Functor.Identity           (Identity)
 import qualified Data.Map                        as Map
+import           Data.Text                       (Text)
+import qualified Data.Text                       as Text
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), defaultMD,
                                                   tExpr)
 import           Language.C.Analysis.ConstEval   (constEval, intValue)
@@ -24,13 +26,13 @@ import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CConstant (..), CExpr,
                                                   CExpression (..), annotation)
 import           Language.C.Syntax.Constants     (CInteger (..))
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import qualified Tokstyle.C.Env                  as Env
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
-import           Tokstyle.C.TravUtils            (getJust)
+import           Tokstyle.C.TravUtils            (backticks, getJust)
 
 
 sameEnum :: Type -> Type -> (Ident, CExpr) -> (Ident, CExpr) -> TravT Env Identity ()
@@ -39,10 +41,8 @@ sameEnum _ _ (leftId, leftExpr) (rightId, rightExpr) = do
     rightVal <- getJust failMsg . intValue =<< constEval defaultMD Map.empty rightExpr
     unless (leftVal == rightVal) $
         recordLinterError (annotation leftExpr) $
-            "invalid cast: enumerator value for `"
-                <> pretty (show (C.pretty leftId)) <> " = " <> pretty leftVal
-                <> "` does not match `"
-                <> pretty (show (C.pretty rightId)) <> " = " <> pretty rightVal <> "`"
+            "invalid cast: enumerator value for" <+> backticks (pretty (show (C.pretty leftId)) <+> "=" <+> pretty leftVal)
+                <+> "does not match" <+> backticks (pretty (show (C.pretty rightId)) <+> "=" <+> pretty rightVal)
   where
     failMsg = "invalid cast: could not determine enumerator values"
 
@@ -52,8 +52,8 @@ checkEnumCast castTy exprTy e = do
     exprEnums <- enumerators (canonicalType exprTy)
     if length castEnums /= length exprEnums
     then recordLinterError (annotation e) $
-            "enum types `" <> pretty (show (C.pretty castTy)) <> "` and `"
-            <> pretty (show (C.pretty exprTy)) <> "` have different a number of enumerators"
+            "enum types" <+> backticks (pretty (show (C.pretty castTy))) <+> "and"
+            <+> backticks (pretty (show (C.pretty exprTy))) <+> "have different a number of enumerators"
     else zipWithM_ (sameEnum castTy exprTy) castEnums exprEnums
 
 enumerators :: MonadTrav m => Type -> m [(Ident, CExpr)]
@@ -125,7 +125,7 @@ checkCast castTy' exprTy' e
     -- Any other casts: NOT OK
     check _ _ =
         recordLinterError (annotation e) $
-            "disallowed cast from " <> pretty (show (C.pretty exprTy')) <> " to " <> pretty (show (C.pretty castTy'))
+            "disallowed cast from" <+> backticks (pretty (show (C.pretty exprTy'))) <+> "to" <+> backticks (pretty (show (C.pretty castTy')))
 
     isNullPtr (CConst (CIntConst (CInteger 0 _ _) _)) = True
     isNullPtr _                                       = False
@@ -161,3 +161,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("cast", "Checks for disallowed casts between incompatible types."))

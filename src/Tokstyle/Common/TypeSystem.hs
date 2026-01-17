@@ -220,8 +220,8 @@ collectTypes node = case node of
     Enumerator name _            -> return [EnumMem name]
     EnumConsts (Just dcl) mems   -> enum dcl mems
     EnumDecl dcl mems _          -> enum dcl mems
-    Typedef [BuiltinType ty] dcl -> int dcl ty
-    Typedef [ty] dcl             -> insert dcl (AliasDescr dcl ty)
+    Typedef [BuiltinType ty] dcl _ -> int dcl ty
+    Typedef [ty] dcl _           -> insert dcl (AliasDescr dcl ty)
 
     FunctionPrototype ty name params -> return [Var name (Function t (concat params)) | t <- ty]
     TypedefFunction a -> do

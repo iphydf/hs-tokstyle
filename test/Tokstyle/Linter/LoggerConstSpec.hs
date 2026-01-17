@@ -1,47 +1,45 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.LoggerConstSpec where
+module Tokstyle.Linter.LoggerConstSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["logger-const"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["logger-const"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid logger declarations" $ do
-        ast <- mustParse
-            [ "void foo(const Logger *log);"
-            ]
-        analyseLocal ["logger-const"] ("test.c", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void foo(const Logger *log);" ]
 
     it "should give diagnostics on invalid logger declarations" $ do
-        ast <- mustParse
-            [ "void foo(Logger *log);"
-            ]
-        analyseLocal ["logger-const"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:1: Logger parameter should be pointer-to-const [-Wlogger-const]"
-            ]
+        shouldWarn'
+            [ "void foo(Logger *log);" ]
+            [[ "warning: Logger parameter should be pointer-to-const [-Wlogger-const]"
+             , "   --> test.c:1:18"
+             , "    |"
+             , "   1| void foo(Logger *log);"
+             , "    |                  ^^^"
+             ]]
 
     it "should not give diagnostics on struct members" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "struct Foo {"
             , "  Logger *log;"
             , "};"
             ]
-        analyseLocal ["logger-const"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should not give diagnostics on variable declarations" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  Logger *log;"
             , "}"
             ]
-        analyseLocal ["logger-const"] ("test.c", ast)
-            `shouldBe`
-            []

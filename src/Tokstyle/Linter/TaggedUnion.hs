@@ -1,7 +1,8 @@
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
-{-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
+{-# LANGUAGE TupleSections         #-}
 module Tokstyle.Linter.TaggedUnion (descr) where
 
 import           Control.Monad               (forM_, when)
@@ -22,11 +23,14 @@ import           Language.Cimple             (BinaryOp (..), Lexeme (..),
                                               LiteralType (..), Node,
                                               NodeF (..), lexemeText)
 import qualified Language.Cimple             as C
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
 import           Language.Cimple.TraverseAst (AstActions (..), astActions,
                                               doNode, traverseAst)
+import           Prettyprinter               (pretty, (<+>))
 import           Text.Read                   (readMaybe)
 import qualified Tokstyle.Common             as Common
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 import           Tokstyle.Common.TypeSystem  (StdType (..), TypeDescr (..),
                                               TypeInfo (..), TypeRef (..),
                                               TypeSystem, collect, collectTypes,
@@ -35,14 +39,13 @@ import           Tokstyle.Common.TypeSystem  (StdType (..), TypeDescr (..),
 
 data LinterState = LinterState
     { guards   :: [(Node (C.Lexeme Text), Text, [Text])]
-    , warnings :: [Text]
+    , warnings :: [Diagnostic CimplePos]
     , varTypes :: Map.Map Text Text
     }
 
-instance HasDiagnostics LinterState where
-    addDiagnostic w st =
-        dtrace ("Adding diagnostic: " ++ Text.unpack w) $
-        st { warnings = w : warnings st }
+instance HasDiagnosticsRich LinterState CimplePos where
+    addDiagnosticRich diag st =
+        st { warnings = diag : warnings st }
 
 debugging :: Bool
 debugging = False
@@ -307,11 +310,11 @@ linter ts tagged untagged = actions
                 C.Struct (L _ _ sname) _ -> do
                     let matches = filter (\(sn, _, _, _, _, _, _) -> sn == sname) tagged
                     forM_ matches $ \(_, _, _, _, _, _, errs) ->
-                        forM_ errs $ \err -> warn file node err
+                        forM_ errs $ \err -> warnDoc file node (pretty err)
                     act
 
                 C.Union (L _ _ uname) _ | uname `elem` untagged -> do
-                    warn file node $ "union `" <> uname <> "` must be tagged in a struct"
+                    warnDoc file node $ "union" <+> backticks (pretty uname) <+> "must be tagged in a struct"
                     act
 
                 C.IfStmt cond trueBody maybeFalseBody -> do
@@ -526,12 +529,12 @@ linter ts tagged untagged = actions
                             if null checkedTags
                             then do
                                 dtraceM "No check found"
-                                warn file mname $ "access to union member `" <> mText <> "` is not guarded by a check on `" <> tname <> "`"
+                                warnDoc file mname $ "access to union member" <+> backticks (pretty mText) <+> "is not guarded by a check on" <+> backticks (pretty tname)
                             else do
                                 let incorrect = filter (not . all (isCorrectTag prefix mText)) checkedTags
                                 when (not $ null incorrect) $ do
                                     dtraceM $ "WARNING: Incorrect tag(s): " ++ show incorrect
-                                    warn file mname $ "access to union member `" <> mText <> "` is not guarded by a check on `" <> expectedTag mText <> "`"
+                                    warnDoc file mname $ "access to union member" <+> backticks (pretty mText) <+> "is not guarded by a check on" <+> backticks (pretty (expectedTag mText))
                     Nothing -> dtraceM $ "Unknown struct type for member access: " ++ Text.unpack uName
             Nothing -> dtraceM "Not a union member access"
 
@@ -563,7 +566,7 @@ linter ts tagged untagged = actions
 
 
 
-analyse :: [(FilePath, [Node (C.Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (C.Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse sources =
     let ts = collect sources
         tagged = findTaggedUnions ts
@@ -574,7 +577,7 @@ analyse sources =
         finalState = execState linterM (LinterState [] [] Map.empty)
     in reverse (warnings finalState)
 
-descr :: ([(FilePath, [Node (C.Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (C.Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("tagged-union", Text.unlines
     [ "Checks that all unions with incompatible types (pointers) in them are tagged,"
     , "and when accessing their members, the tag is checked."

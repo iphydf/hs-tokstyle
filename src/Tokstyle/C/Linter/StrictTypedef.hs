@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
 {-# LANGUAGE ViewPatterns      #-}
-module Tokstyle.C.Linter.StrictTypedef (analyse) where
+module Tokstyle.C.Linter.StrictTypedef (descr) where
 
 import           Data.Functor.Identity           (Identity)
 import           Data.List                       (find, intercalate, isInfixOf,
@@ -52,6 +52,7 @@ import           Tokstyle.C.Env                  (DiagnosticLevel (..),
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 -- | Get the name of an identifier.
@@ -228,7 +229,7 @@ recordMismatch info (Mismatch rootExpected rootActual path expected actual) =
             (InParam _ n:_) ->
                 "passing" <+> prettyEssenceBrief actual <+> "to parameter" <+> maybe mempty (\name -> "'" <> pretty name <> "'") n <+> "of type" <+> prettyEssenceBrief expected
             (InVariable n:_) ->
-                "assigning" <+> prettyEssenceBrief actual <+> "to variable '" <> pretty n <> "' of type" <+> prettyEssenceBrief expected
+                "assigning" <+> prettyEssenceBrief actual <+> "to variable" <+> backticks (pretty n) <+> "of type" <+> prettyEssenceBrief expected
             _ ->
                 "strict typedef mismatch"
 
@@ -435,3 +436,14 @@ analyse :: GlobalDecls -> Trav Env ()
 analyse decls = do
     modifyUserState $ \env -> env{mainTypedefs = getMainTypedefs decls, globalDecls = Just decls}
     traverseAst linter decls
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("strict-typedef", Text.unlines
+    [ "Implements strict typedef checking."
+    , ""
+    , "This linter ensures that logically distinct types (represented by different"
+    , "typedefs) are not accidentally mixed, even if they have the same underlying"
+    , "representation. This is particularly useful for identifiers, indices, and"
+    , "role-based types."
+    ]))

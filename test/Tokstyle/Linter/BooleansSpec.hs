@@ -1,47 +1,57 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.BooleansSpec where
+module Tokstyle.Linter.BooleansSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (allWarnings, analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["booleans"]
 
 
 spec :: Spec
 spec = do
     it "should give diagnostics on simplifiable if-return" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b == 0) { return true; }"
             , "  return false;"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: if-statement followed by boolean return can be simplified to return [-Wbooleans]"
-            ]
+            [[ "warning: if-statement followed by boolean return can be simplified to return [-Wbooleans]"
+             , "   --> test.c:2:7"
+             , "    |"
+             , "   2|   if (b == 0) { return true; }"
+             , "    |       ^^^^^^^^^^^^^^^^^^^^^"
+             ]]
 
     it "should give diagnostics on simplifiable if/else with boolean return" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b == 0) { return true; }"
             , "  else { return false; }"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: if/else with return true/false can be simplified to return [-Wbooleans]"
-            ]
+            [[ "warning: if/else with return true/false can be simplified to return [-Wbooleans]"
+             , "   --> test.c:2:7"
+             , "    |"
+             , "   2|   if (b == 0) { return true; }"
+             , "    |       ^^^^^^^^^^^^^^^^^^^^^^^^"
+             ]]
 
     it "should give diagnostics when there are other statements before the violating code" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  do_something();"
             , "  if (b == 0) { return true; }"
             , "  return false;"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:3: if-statement followed by boolean return can be simplified to return [-Wbooleans]"
-            ]
+            [[ "warning: if-statement followed by boolean return can be simplified to return [-Wbooleans]"
+             , "   --> test.c:3:7"
+             , "    |"
+             , "   3|   if (b == 0) { return true; }"
+             , "    |       ^^^^^^^^^^^^^^^^^^^^^"
+             ]]

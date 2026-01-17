@@ -1,33 +1,41 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.ConstnessSpec where
+module Tokstyle.Linter.ConstnessSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["constness"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["constness"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on parameters or pointer or array types" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "int a(int b) {"
             , "  int *a = get();"
             , "  int b[3];"
             , "  return *a + b[0];"
             , "}"
             ]
-        analyseLocal ["constness"] ("test.c", ast)
-            `shouldBe` []
 
     it "should give diagnostics on locals that can be const" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  int a = get();"
             , "  return a;"
             , "}"
             ]
-        analyseLocal ["constness"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: variable `a` is never written to and can be declared `const` [-Wconstness]"
-            ]
+            [[ "warning: variable `a` is never written to and can be declared `const` [-Wconstness]"
+             , "   --> test.c:2:7"
+             , "    |"
+             , "   2|   int a = get();"
+             , "    |       ^"
+             ]]

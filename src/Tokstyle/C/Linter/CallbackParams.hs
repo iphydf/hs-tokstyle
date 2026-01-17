@@ -2,10 +2,11 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.CallbackParams (analyse) where
+module Tokstyle.C.Linter.CallbackParams (descr) where
 
 import           Data.Functor.Identity           (Identity)
 import           Data.Maybe                      (mapMaybe)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemError    (invalidAST)
 import           Language.C.Analysis.SemRep      (GlobalDecls, ParamDecl (..),
@@ -14,11 +15,12 @@ import           Language.C.Analysis.TravMonad   (Trav, TravT, throwTravError)
 import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpr, CExpression (..),
                                                   annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 paramNames :: (Int, ParamDecl, ParamDecl) -> Maybe (Int, String, String)
@@ -36,8 +38,8 @@ checkParams (ParamDecl (VarDecl _ _ cbTy@(FunPtrParams params)) _, expr, ty) = d
         [] -> return ()
         (i, a, b):_ ->
             recordLinterError (annotation expr) $
-                "parameter " <> pretty i <> " of " <> pretty (show (C.pretty expr)) <> " is named `"
-                <> pretty b <> "`, but in callback type `" <> pretty (show (C.pretty cbTy)) <> "` it is named `" <> pretty a <> "`"
+                "parameter" <+> pretty i <+> "of" <+> pretty (show (C.pretty expr)) <+> "is named" <+> backticks (pretty b)
+                <> ", but in callback type" <+> backticks (pretty (show (C.pretty cbTy))) <+> "it is named" <+> backticks (pretty a)
 checkParams _ = return ()
 
 
@@ -58,3 +60,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("callback-params", "Checks that the parameter names of a callback match its definition."))

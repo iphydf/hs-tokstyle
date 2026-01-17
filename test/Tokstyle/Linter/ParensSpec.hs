@@ -1,29 +1,38 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.ParensSpec where
+module Tokstyle.Linter.ParensSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (allWarnings, analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["parens"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["parens"]
 
 
 spec :: Spec
 spec = do
     it "warns about parentheses around return expressions" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  return (1 + 2);"
             , "}"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: return expression does not need parentheses [-Wparens]"
-            ]
+            [[ "warning: return expression does not need parentheses [-Wparens]"
+             , "   --> test.c:2:11"
+             , "    |"
+             , "   2|   return (1 + 2);"
+             , "    |           ^^^^^"
+             ]]
 
     it "does not warn about parens in if conditions" $ do
-        ast <- mustParse
-            [ "int a(int b) {"
-            , "  if ((true)) { return 3; }"
-            , "}"
-            ]
-        analyseLocal allWarnings ("test.c", ast) `shouldBe` []
+        shouldAccept'
+                [ "int a(int b) {"
+                , "  if ((true)) { return 3; }"
+                , "}"
+                ]

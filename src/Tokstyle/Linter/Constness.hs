@@ -14,9 +14,11 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..),
                                               UnaryOp (..), lexemeText)
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 -- | Specifies what is happening to a variable.
 --
@@ -108,23 +110,23 @@ findCandidatesForConst =
     . foldFix constness
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
             FunctionDefn{} ->
                 let vars = findCandidatesForConst node in
-                mapM_ (\var -> warn file var $
-                    "variable `" <> lexemeText var
-                    <> "` is never written to and can be declared `const`") vars
+                mapM_ (\var -> warnDoc file var $
+                    "variable" <+> backticks (pretty (lexemeText var))
+                    <+> "is never written to and can be declared `const`") vars
 
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("constness", Text.unlines
     [ "Warns if a variable can be marked as `const`, i.e. it is only initialised and"
     , "then never assigned again. Pointer types are exempt, i.e. `int *p = get_p();`"

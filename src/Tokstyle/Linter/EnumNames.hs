@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Linter.EnumNames (descr) where
 
 import           Control.Monad               (unless)
@@ -11,19 +12,22 @@ import           Data.Maybe                  (maybeToList)
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (hsep, pretty, punctuate, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data Linter = Linter
-    { diags    :: [Text]
+    { diags    :: [Diagnostic CimplePos]
     , enumName :: Text
     , prefix   :: Text
     }
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 empty :: Linter
 empty = Linter [] "" ""
@@ -89,10 +93,10 @@ linter = astActions
                 Linter{enumName, prefix} <- State.get
                 let prefixes = stripType prefix
                 unless (any (`Text.isPrefixOf` name) prefixes) $
-                    warn file node $
-                        "enumerator `" <> name <> "` in enum `" <> enumName
-                        <> "` should start with "
-                        <> Text.intercalate " or " (map (\x -> "`" <> x <> "`") prefixes)
+                    warnDoc file node $
+                        "enumerator" <+> backticks (pretty name) <+> "in enum" <+> backticks (pretty enumName)
+                        <+> "should start with"
+                        <+> hsep (punctuate " or" (map (backticks . pretty) prefixes))
 
             _ -> act
     }
@@ -106,10 +110,10 @@ linter = astActions
       where
         allowSuffix s = maybeToList ((<>"_") <$> Text.stripSuffix s name)
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . diags . flip State.execState empty . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("enum-names", Text.unlines
     [ "Checks that `enum` value constants have the same prefix as the `enum` type,"
     , "except they should be SCREAMING_CASE instead of Camel_Snake. There are currently"

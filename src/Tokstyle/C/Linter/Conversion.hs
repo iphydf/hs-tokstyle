@@ -1,10 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.Conversion (analyse) where
+module Tokstyle.C.Linter.Conversion (descr) where
 
 import           Control.Monad                   (unless)
 import           Data.Functor.Identity           (Identity)
 import           Data.List                       (isSuffixOf)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemRep      (FunDef (..), FunType (..),
                                                   GlobalDecls, IdentDecl (..),
@@ -20,12 +21,13 @@ import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (Annotated, CAssignOp (..),
                                                   CExpr, CExpression (..),
                                                   CStatement (..), annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import qualified Tokstyle.C.Env                  as Env
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 typeEq :: Type -> Type -> Bool
 typeEq a b = sameType (canon a) (canon b)
@@ -43,8 +45,8 @@ checkConversion _ (r, _) (_, _) | "cmp/cmp.c" `isSuffixOf` posFile (posOf (annot
 checkConversion context (r, rTy') (_, lTy') =
     unless isAllowed $
         recordLinterError (annotation r) $
-            "invalid conversion from `" <> pretty rTyName <> "` to `" <>
-                pretty lTyName <> "` in " <> pretty context
+            "invalid conversion from" <+> backticks (pretty rTyName) <+> "to" <+>
+                backticks (pretty lTyName) <+> "in" <+> pretty context
   where
     rTy = removeQuals rTy'
     lTy = removeQuals lTy'
@@ -139,3 +141,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("conversion", "Checks for disallowed implicit conversions."))

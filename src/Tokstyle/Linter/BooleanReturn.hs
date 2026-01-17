@@ -13,9 +13,11 @@ import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LiteralType (..),
                                               Node, NodeF (..), UnaryOp (..),
                                               lexemeText)
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data Value a
@@ -50,15 +52,15 @@ returnedConstValues = List.sort . List.nub . Maybe.mapMaybe returnedConst . empt
     uopToken op       = error (show op)
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
             FunctionDefn _ (Fix (FunctionPrototype _ name _)) _ | isEligible name ->
                 case returnedConstValues node of
-                  [v1, v2] -> warn file name $
-                      "function `" <> lexemeText name <> "` only ever returns two values `"
-                      <> v1 <> "` and `" <> v2 <> "`; it can return `bool`"
+                  [v1, v2] -> warnDoc file name $
+                      "function" <+> backticks (pretty (lexemeText name)) <+> "only ever returns two values"
+                      <+> backticks (pretty v1) <+> "and" <+> backticks (pretty v2) <> "; it can return `bool`"
                   _ -> return ()
 
             _ -> act
@@ -67,10 +69,10 @@ linter = astActions
     -- Ignore event handlers named something with "handle" in the name.
     isEligible = not . ("handle" `Text.isInfixOf`) . lexemeText
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("boolean-return", Text.unlines
     [ "Checks for functions that always return constant integers and thus seem to be"
     , "semantically boolean functions. E.g. a function returning -1 for error and 0 for"

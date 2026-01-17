@@ -20,8 +20,15 @@ library
   exposed-modules:
     Tokstyle.C.Env
     Tokstyle.C.Linter
+    Tokstyle.C.ObjectSystem
+    Tokstyle.C.Analysis.AccessPath
+    Tokstyle.C.Analysis.CFG
+    Tokstyle.C.Analysis.Dataflow
+    Tokstyle.C.Analysis.Liveness
     Tokstyle.C.Linter.BoolConversion
+    Tokstyle.C.Linter.BorrowCheck
     Tokstyle.C.Linter.CallbackData
+    Tokstyle.C.Linter.CallbackDiscipline
     Tokstyle.C.Linter.CallbackParams
     Tokstyle.C.Linter.Cast
     Tokstyle.C.Linter.Conversion
@@ -84,7 +91,7 @@ library
     , array           <0.6
     , base            >=4       && <5
     , bytestring      <0.13
-    , cimple          >=0.0.29
+    , cimple          >=0.0.30
     , casing          <0.2
     , containers      <0.8
     , data-fix        <0.4
@@ -110,8 +117,13 @@ executable check-cimple
   main-is:          check-cimple.hs
   build-depends:
       base      <5
+    , bytestring
     , cimple
+    , containers
+    , optparse-applicative
     , parallel  <4
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , text
     , time      <2
     , tokstyle
@@ -125,6 +137,7 @@ executable check-c
       base            <5
     , language-c
     , monad-parallel  <0.9
+    , optparse-applicative
     , prettyprinter
     , prettyprinter-ansi-terminal
     , tokstyle
@@ -155,8 +168,12 @@ test-suite testsuite
   hs-source-dirs:     test
   main-is:            testsuite.hs
   other-modules:
+    Tokstyle.C.Analysis.CFGSpec
+    Tokstyle.C.Analysis.DataflowSpec
     Tokstyle.C.Linter.BoolConversionSpec
+    Tokstyle.C.Linter.BorrowCheckSpec
     Tokstyle.C.Linter.CallbackDataSpec
+    Tokstyle.C.Linter.CallbackDisciplineSpec
     Tokstyle.C.Linter.CallbackParamsSpec
     Tokstyle.C.Linter.CastSpec
     Tokstyle.C.Linter.ConversionSpec

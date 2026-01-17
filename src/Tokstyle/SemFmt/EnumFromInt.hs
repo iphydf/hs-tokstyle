@@ -2,17 +2,19 @@
 {-# LANGUAGE Strict            #-}
 module Tokstyle.SemFmt.EnumFromInt (descr) where
 
-import           Control.Applicative        ((<|>))
-import           Data.Fix                   (Fix (..))
-import           Data.List.Extra            (firstJust)
-import           Data.Maybe                 (mapMaybe)
-import           Data.Text                  (Text)
-import qualified Data.Text                  as Text
-import           Language.Cimple            (AssignOp (..), Lexeme (..),
-                                             LexemeClass (..), LiteralType (..),
-                                             Node, NodeF (..), UnaryOp (..))
-import           Tokstyle.Common.EnumLinter (EnumInfo (..), MkFunBody,
-                                             analyseEnums, mkLAt)
+import           Control.Applicative         ((<|>))
+import           Data.Fix                    (Fix (..))
+import           Data.List.Extra             (firstJust)
+import           Data.Maybe                  (mapMaybe)
+import           Data.Text                   (Text)
+import qualified Data.Text                   as Text
+import           Language.Cimple             (AssignOp (..), Lexeme (..),
+                                              LexemeClass (..),
+                                              LiteralType (..), Node,
+                                              NodeF (..), UnaryOp (..))
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
+import           Tokstyle.Common.EnumLinter  (EnumInfo (..), MkFunBody,
+                                              analyseEnums, mkLAt)
 
 
 funSuffix :: Text
@@ -53,10 +55,10 @@ mkFunBody _ varName (EnumInfo _ enumrs) = do
     isEnumr _                      = Nothing
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = analyseEnums funSuffix mkFunBody
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("enum-from-int", Text.unlines
     [ "Checks that `_from_int` functions for `enum`s are complete."
     , ""

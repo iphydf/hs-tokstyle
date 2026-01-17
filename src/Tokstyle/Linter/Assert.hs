@@ -9,14 +9,16 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (Diagnostics)
-import qualified Language.Cimple.Diagnostics as Diagnostics
-import           Language.Cimple.Pretty      (showNode)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              DiagnosticsT)
+import           Language.Cimple.Pretty      (ppNode)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
-checkAssertArg :: FilePath -> Lexeme Text -> Node (Lexeme Text) -> Diagnostics ()
+checkAssertArg :: FilePath -> Lexeme Text -> Node (Lexeme Text) -> DiagnosticsT [Diagnostic CimplePos] ()
 checkAssertArg file name expr =
     case unFix expr of
       LiteralExpr{}     -> return ()
@@ -42,10 +44,10 @@ checkAssertArg file name expr =
       FunctionCall (Fix (VarExpr (L _ _ func))) args -> do
           mapM_ (checkAssertArg file name) args
           unless (func `elem` exemptions) $
-              Diagnostics.warn file name $
-                  "non-pure function `" <> func <> "` cannot be called inside `assert()`"
-      _ -> Diagnostics.warn file name $
-          "invalid expression in assert: `" <> showNode expr <> "` is not a pure function"
+              warnDoc file name $
+                  "non-pure function" <+> backticks (pretty func) <+> "cannot be called inside `assert()`"
+      _ -> warnDoc file name $
+          "invalid expression in assert: `" <> ppNode expr <> "` is not a pure function"
 
 -- Known const/pure functions.
 exemptions :: [Text]
@@ -57,7 +59,7 @@ exemptions =
     ]
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -68,10 +70,10 @@ linter = astActions
     }
 
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("assert", Text.unlines
     [ "Checks whether `assert` is side-effect-free. Only pure expressions"
     , "(no function calls, no assignments) and an allowlist of exemptions are permitted"

@@ -9,9 +9,10 @@ import           Data.Maybe                  (maybeToList)
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Tokstyle.Common             (warn)
 
 
 needsParens :: Node a -> Bool
@@ -22,13 +23,13 @@ needsParens n = case unFix n of
     _             -> False
 
 
-checkArg :: FilePath -> Node (Lexeme Text) -> State [Text] ()
+checkArg :: FilePath -> Node (Lexeme Text) -> State [Diagnostic CimplePos] ()
 checkArg file arg = case unFix arg of
     ParenExpr{} -> warn file arg "function call argument does not need parentheses"
     _           -> return ()
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -59,10 +60,10 @@ linter = astActions
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("parens", Text.unlines
     [ "Suggests removing parentheses where they are not needed:"
     , ""

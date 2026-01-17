@@ -1,38 +1,42 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.CallbackNamesSpec where
+module Tokstyle.Linter.CallbackNamesSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["callback-names"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["callback-names"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid callback names" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "typedef void bar_cb(void);"
             , "void foo(bar_cb *bar_callback);"
             ]
-        analyseLocal ["callback-names"] ("test.h", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid callback names" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "typedef void bar_cb(void);"
             , "void foo(bar_cb *bar);"
             ]
-        analyseLocal ["callback-names"] ("test.h", ast)
-            `shouldBe`
-            [ "test.h:2: function pointer `bar` should end in `callback` [-Wcallback-names]"
-            ]
+            [[ "warning: function pointer `bar` should end in `callback` [-Wcallback-names]"
+             , "   --> test.c:2:10"
+             , "    |"
+             , "   2| void foo(bar_cb *bar);"
+             , "    |          ^^^^^^^^^^^"
+             ]]
 
     it "should handle various allowed suffixes" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "typedef void foo_cb(void);"
             , "void foo(foo_cb *bar_callback, foo_cb *bar_function, foo_cb *bar_handler);"
             ]
-        analyseLocal ["callback-names"] ("test.h", ast)
-            `shouldBe`
-            []

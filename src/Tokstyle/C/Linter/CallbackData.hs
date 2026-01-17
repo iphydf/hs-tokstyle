@@ -4,7 +4,7 @@
 {-# LANGUAGE PatternSynonyms   #-}
 {-# LANGUAGE Strict            #-}
 {-# LANGUAGE ViewPatterns      #-}
-module Tokstyle.C.Linter.CallbackData (analyse) where
+module Tokstyle.C.Linter.CallbackData (descr) where
 
 import           Control.Monad                   (forM_, when)
 import           Data.Functor.Identity           (Identity)
@@ -12,6 +12,7 @@ import           Data.List                       (isSuffixOf)
 import           Data.Map.Strict                 (Map)
 import qualified Data.Map.Strict                 as Map
 import           Data.Maybe                      (listToMaybe, mapMaybe)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemRep      (FunDef (..), FunType (..),
                                                   GlobalDecls (..),
@@ -25,11 +26,12 @@ import           Language.C.Analysis.TypeUtils   (canonicalType, sameType)
 import           Language.C.Data.Ident           (Ident (Ident))
 import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env (..), recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 -- | Get the name of an identifier.
@@ -103,8 +105,8 @@ checkCall inferred params args = do
                 Just expectedTy ->
                     when (not $ compatibleContext expectedTy pTy) $
                         recordLinterError (annotation p) $
-                            "callback expects context of type `" <> pretty (show (C.pretty expectedTy))
-                             <> "`, but got `" <> pretty (show (C.pretty pTy)) <> "`"
+                            "callback expects context of type" <+> backticks (pretty (show (C.pretty expectedTy)))
+                             <> ", but got" <+> backticks (pretty (show (C.pretty pTy)))
                 Nothing -> return ()
         Nothing -> return ()
   where
@@ -127,8 +129,8 @@ checkBlockItems inferred items = do
                     Just expectedTy ->
                         when (not $ compatibleContext expectedTy objTy) $
                             recordLinterError (annotation objExpr) $
-                                "callback expects context of type `" <> pretty (show (C.pretty expectedTy))
-                                 <> "`, but got `" <> pretty (show (C.pretty objTy)) <> "`"
+                                "callback expects context of type" <+> backticks (pretty (show (C.pretty expectedTy)))
+                                 <> ", but got" <+> backticks (pretty (show (C.pretty objTy)))
                     Nothing -> return ()
             _ -> return ()
   where
@@ -183,3 +185,7 @@ analyse decls = do
     traverseAst collector decls
     inferred <- inferredTypes <$> getUserState
     traverseAst (linter inferred) decls
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("callback-data", "Checks that the context pointer passed to a callback matches the expected type inferred from the callback's first argument."))

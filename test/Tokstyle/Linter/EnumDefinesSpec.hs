@@ -1,29 +1,39 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.EnumDefinesSpec where
+module Tokstyle.Linter.EnumDefinesSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (allWarnings, analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["enum-defines"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["enum-defines"]
 
 
 spec :: Spec
 spec = do
     it "suggests using enums for long sequences of #defines" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "#define FOO_BAR_ONE 1"
             , "#define FOO_BAR_TWO 2"
             , "#define FOO_BAR_THREE 3"
             , "#define FOO_BAR_FOUR 4"
             , "#define FOO_BAR_FIVE 5"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:5: sequence of `#define`s longer than 5 could be written as `enum Foo_Bar` [-Wenum-defines]"
-            ]
+            [[ "warning: sequence of `#define`s longer than 5 could be written as `enum Foo_Bar` [-Wenum-defines]"
+             , "   --> test.c:5:9"
+             , "    |"
+             , "   5| #define FOO_BAR_FIVE 5"
+             , "    |         ^^^^^^^^^^^^^^"
+             ]]
 
     it "allows comments to be interspersed in the enum" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "#define FOO_BAR_ONE 1"
             , "#define FOO_BAR_TWO 2"
             , "// some comment here"
@@ -32,13 +42,15 @@ spec = do
             , "#define FOO_BAR_FOUR 4"
             , "#define FOO_BAR_FIVE 5"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe`
-            [ "test.c:7: sequence of `#define`s longer than 5 could be written as `enum Foo_Bar` [-Wenum-defines]"
-            ]
+            [[ "warning: sequence of `#define`s longer than 5 could be written as `enum Foo_Bar` [-Wenum-defines]"
+             , "   --> test.c:7:9"
+             , "    |"
+             , "   7| #define FOO_BAR_FIVE 5"
+             , "    |         ^^^^^^^^^^^^^^"
+             ]]
 
     it "ignores broken sequences" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "#define FOO_BAR_ONE 1"
             , "#define FOO_BAR_TWO 2"
             , "static const uint32_t xxx = 10;"  -- breaks the sequence, we ignore this because it doesn't look like an enum
@@ -46,16 +58,12 @@ spec = do
             , "#define FOO_BAR_FOUR 4"
             , "#define FOO_BAR_FIVE 5"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe` []
 
     it "ignores defines with large values" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "#define FOO_BAR_ONE 1"
             , "#define FOO_BAR_TWO 0x20"
             , "#define FOO_BAR_THREE 300"
             , "#define FOO_BAR_FOUR 4"
             , "#define FOO_BAR_FIVE 5"
             ]
-        analyseLocal allWarnings ("test.c", ast)
-            `shouldBe` []

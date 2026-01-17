@@ -16,9 +16,12 @@ import qualified Data.Text                   as Text
 import           Language.Cimple             (AlexPosn (..), Lexeme (..),
                                               LexemeClass (..), Node,
                                               NodeF (..), lexemeText)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic (..),
+                                              DiagnosticLevel (..), lexemePos)
 import qualified Language.Cimple.Diagnostics as Diagnostics
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty)
 import           Text.EditDistance           (defaultEditCosts,
                                               levenshteinDistance)
 
@@ -69,7 +72,7 @@ collectPairs = astActions
             _ -> act
     }
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse =
     uncurry (concatMap . makeDiagnostic)
     . (mapMaybe defn &&& mapMaybe lacksDefn)
@@ -80,21 +83,18 @@ analyse =
     lacksDefn DeclDefn{decl, defn = Nothing} = decl
     lacksDefn _                              = Nothing
 
-makeDiagnostic :: [(FilePath, Lexeme Text)] -> (FilePath, Lexeme Text) -> [Text]
+makeDiagnostic :: [(FilePath, Lexeme Text)] -> (FilePath, Lexeme Text) -> [Diagnostic CimplePos]
 makeDiagnostic defns (file, fn@(L _ _ name)) =
-    Diagnostics.sloc file fn <> ": missing definition for `" <> name <> "`"
-    : suggestion
+    Diagnostic (lexemePos file fn) (Text.length name) WarningLevel (pretty $ "missing definition for `" <> name <> "`") Nothing [] []
+    : case dists defns of
+        (d, (dfile, dn@(L _ _ dname))):_ | d < maxEditDistance ->
+            [Diagnostic (lexemePos dfile dn) (Text.length dname) NoteLevel (pretty $ "did you mean `" <> dname <> "`?") Nothing [] []]
+        _ -> []
   where
     dists = sortOn fst . map ((levenshteinDistance defaultEditCosts (normalise fn) . normalise . snd) &&& id)
     normalise = Text.unpack . Text.toLower . lexemeText
 
-    suggestion =
-        case dists defns of
-            (d, (dfile, dn@(L _ _ dname))):_ | d < maxEditDistance ->
-                [Diagnostics.sloc dfile dn <> ": did you mean `" <> dname <> "`?"]
-            _ -> []
-
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("decls-have-defns", Text.unlines
     [ "Checks that all function declarations also have matching definitions."
     , ""

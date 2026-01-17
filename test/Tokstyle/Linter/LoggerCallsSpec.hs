@@ -1,43 +1,47 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.LoggerCallsSpec where
+module Tokstyle.Linter.LoggerCallsSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["logger-calls"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["logger-calls"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid logger calls" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(Logger *log) {"
             , "  LOGGER_INFO(log, \"foo\");"
             , "  LOGGER_INFO(log, \"foo\", 1);"
             , "}"
             ]
-        analyseLocal ["logger-calls"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid logger calls" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void foo(Logger *log) {"
             , "  const char *foo = \"foo\";"
             , "  LOGGER_INFO(log, foo);"
             , "}"
             ]
-        analyseLocal ["logger-calls"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:3: logger call `LOGGER_INFO` has a non-literal format argument [-Wlogger-calls]"
-            ]
+            [[ "warning: logger call `LOGGER_INFO` has a non-literal format argument [-Wlogger-calls]"
+             , "   --> test.c:3:3"
+             , "    |"
+             , "   3|   LOGGER_INFO(log, foo);"
+             , "    |   ^^^^^^^^^^^"
+             ]]
 
     it "should not give diagnostics on LOGGER_ASSERT" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(Logger *log) {"
             , "  LOGGER_ASSERT(log, 1, \"foo\");"
             , "}"
             ]
-        analyseLocal ["logger-calls"] ("test.c", ast)
-            `shouldBe`
-            []

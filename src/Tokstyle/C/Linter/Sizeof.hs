@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
 {-# LANGUAGE ViewPatterns      #-}
-module Tokstyle.C.Linter.Sizeof (analyse) where
+module Tokstyle.C.Linter.Sizeof (descr) where
 
 import           Data.Functor.Identity           (Identity)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.SemRep      (GlobalDecls, Type (..))
 import           Language.C.Analysis.TravMonad   (MonadTrav, Trav, TravT)
@@ -11,11 +12,12 @@ import           Language.C.Analysis.TypeUtils   (canonicalType)
 import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpr, CExpression (..),
                                                   annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 -- | This catches `sizeof(buf)` where `buf` is a pointer instead of an array.
@@ -27,8 +29,8 @@ checkSizeof e ty
   | isIntegral ty = return ()
   | otherwise =
       recordLinterError (annotation e) $
-          "disallowed sizeof argument of type `" <> pretty (show (C.pretty ty)) <>
-          "` - did you mean for `" <> pretty (show (C.pretty e)) <> "` to be an array?"
+          "disallowed sizeof argument of type" <+> backticks (pretty (show (C.pretty ty)))
+          <+> "- did you mean for" <+> backticks (pretty (show (C.pretty e))) <+> "to be an array?"
 
 
 linter :: AstActions (TravT Env Identity)
@@ -45,3 +47,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("sizeof", "Checks for `sizeof(buf)` where `buf` is a pointer instead of an array."))

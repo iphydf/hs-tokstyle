@@ -1,6 +1,6 @@
 # Cimple-based linters (`check-cimple`)
 
-There are currently 37 linters implemented, out of which 11 perform global analyses.
+There are currently 37 linters implemented, out of which 12 perform global analyses.
 In the list below, the global ones are marked specially.
 
 ## `-Wassert`
@@ -325,7 +325,7 @@ Warns if a function has more than 7 nesting levels.
 
 **Reason:** deep nesting makes functions more difficult to comprehend.
 
-## `-Wnullability`
+## `-Wnullability` (global)
 
 Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer without a null check.
 

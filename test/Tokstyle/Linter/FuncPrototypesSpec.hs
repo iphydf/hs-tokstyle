@@ -1,43 +1,36 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.FuncPrototypesSpec where
+module Tokstyle.Linter.FuncPrototypesSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["func-prototypes"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["func-prototypes"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on (void) parameter list" $ do
-        ast <- mustParse
-            [ "void foo(void);"
-            ]
-        analyseLocal ["func-prototypes"] ("test.h", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void foo(void);" ]
 
     it "should give diagnostics on () parameter list in declaration" $ do
-        ast <- mustParse
-            [ "void foo();"
-            ]
-        analyseLocal ["func-prototypes"] ("test.h", ast)
-            `shouldBe`
-            [ "test.h:1: empty parameter list must be written as `(void)` [-Wfunc-prototypes]"
-            ]
+        shouldWarn' [ "void foo();" ]
+            [[ "warning: empty parameter list must be written as `(void)` [-Wfunc-prototypes]"
+             , "   --> test.c:1:6"
+             , "    |"
+             , "   1| void foo();"
+             , "    |      ^^^"
+             ]]
 
     it "should not give diagnostics on () parameter list in definition" $ do
-        ast <- mustParse
-            [ "int foo() { return 0; }"
-            ]
-        analyseLocal ["func-prototypes"] ("test.c", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "int foo() { return 0; }" ]
 
     it "should not give diagnostics on functions with parameters" $ do
-        ast <- mustParse
-            [ "void foo(int a, int b);"
-            ]
-        analyseLocal ["func-prototypes"] ("test.h", ast)
-            `shouldBe`
-            []
+        shouldAccept' [ "void foo(int a, int b);" ]

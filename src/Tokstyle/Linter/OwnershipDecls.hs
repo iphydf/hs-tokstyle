@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Linter.OwnershipDecls (descr) where
 
 import           Control.Monad               (unless, when)
@@ -14,21 +15,24 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..),
                                               Scope (..), lexemeText)
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (hsep, pretty, punctuate, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data Linter = Linter
-    { diags :: [Text]
+    { diags :: [Diagnostic CimplePos]
     , decls :: Set Text
     }
 
 empty :: Linter
 empty = Linter [] Set.empty
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 
 findQualifiers :: Node (Lexeme Text) -> [Text]
@@ -63,19 +67,19 @@ linter = astActions
                 let isDeclared = nameText `Set.member` decls
                 let qs = List.nub $ findPrototypeQualifiers proto
                 unless (null qs || (scope == Static && not isDeclared)) $
-                    warn file name $ "qualifier" <> (if length qs > 1 then "s" else "")
-                        <> " " <> Text.intercalate " and " (map (\q -> "`" <> q <> "`") qs)
-                        <> " should only be used on function declarations, not definitions"
+                    warnDoc file name $ "qualifier" <> (if length qs > 1 then "s" else "")
+                        <+> hsep (punctuate " and" (map (backticks . pretty) qs))
+                        <+> "should only be used on function declarations, not definitions"
                 act
 
             _ -> act
     }
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse tus = reverse . diags $ State.execState (traverseAst linter tus) empty
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("ownership-decls", Text.unlines
     [ "Checks that `_Owner`, `_Nullable`, and `_Nonnull` are only set on declarations,"
     , "not definitions, unless it's a static definition without prior declaration."

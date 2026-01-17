@@ -2,14 +2,15 @@
 {-# LANGUAGE Strict            #-}
 module Tokstyle.SemFmt.EnumUnpack (descr) where
 
-import           Data.Fix                   (Fix (..))
-import           Data.Text                  (Text)
-import qualified Data.Text                  as Text
-import           Language.Cimple            (BinaryOp (..), Lexeme (..),
-                                             LexemeClass (..), Node, NodeF (..),
-                                             UnaryOp (..))
-import           Tokstyle.Common.EnumLinter (EnumInfo (EnumInfo), MkFunBody,
-                                             analyseEnums, mkLAt)
+import           Data.Fix                    (Fix (..))
+import           Data.Text                   (Text)
+import qualified Data.Text                   as Text
+import           Language.Cimple             (BinaryOp (..), Lexeme (..),
+                                              LexemeClass (..), Node,
+                                              NodeF (..), UnaryOp (..))
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
+import           Tokstyle.Common.EnumLinter  (EnumInfo (EnumInfo), MkFunBody,
+                                              analyseEnums, mkLAt)
 
 
 funSuffix :: Text
@@ -53,10 +54,10 @@ mkFunBody _ varName (EnumInfo ename _) = return $
                               Fix (VarExpr (mkLAt varName IdVar "val"))]))))))])
 
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = analyseEnums funSuffix mkFunBody
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Text], (Text, Text))
+descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("enum-unpack", Text.unlines
     [ "Checks that `_unpack` functions for `enum`s are complete."
     , ""

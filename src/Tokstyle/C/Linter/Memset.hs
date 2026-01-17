@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.Memset (analyse) where
+module Tokstyle.C.Linter.Memset (descr) where
 
 import           Control.Monad                   (unless)
 import           Data.Functor.Identity           (Identity)
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), tExpr)
 import           Language.C.Analysis.DefTable    (lookupTag)
 import           Language.C.Analysis.SemRep      (CompType (..),
@@ -18,10 +19,11 @@ import           Language.C.Data.Error           (userErr)
 import           Language.C.Data.Ident           (Ident (..))
 import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpression (..), annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 hasPtrs :: MonadTrav m => Type -> m Bool
@@ -59,8 +61,8 @@ linter = astActions
             allowed <- memsetAllowed ty
             unless allowed $
                 recordLinterError (annotation s) $
-                    "disallowed memset argument `" <> pretty (show (C.pretty s)) <> "` of type `"
-                     <> pretty (show (C.pretty ty)) <> "`, which contains pointers"
+                    "disallowed memset argument" <+> backticks (pretty (show (C.pretty s))) <+> "of type"
+                     <+> backticks (pretty (show (C.pretty ty))) <> ", which contains pointers"
             act
 
         _ -> act
@@ -69,3 +71,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("memset", "Checks for memset calls on types that contain pointers."))

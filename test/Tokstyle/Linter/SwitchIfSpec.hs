@@ -1,16 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.SwitchIfSpec where
+module Tokstyle.Linter.SwitchIfSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["switch-if"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["switch-if"]
 
 
 spec :: Spec
 spec = do
     it "accepts a single if/else" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "bool a(int b) {"
             , "  if (b == THE_FOO) {"
             , "    print_int(b);"
@@ -20,10 +28,9 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast) `shouldBe` []
 
     it "accepts a if/else with only 2 comparisons" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "bool a(int b) {"
             , "  if (b == THE_FOO) {"
             , "    print_int(b);"
@@ -36,10 +43,9 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast) `shouldBe` []
 
     it "ignores candidates where all branches are single statements" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "int a(int b) {"
             , "  if (b == THE_FOO) {"
             , "    return 0;"
@@ -50,10 +56,9 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast) `shouldBe` []
 
     it "diagnoses a series of if/else-if statements as candidate for switch" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b == THE_FOO) {"
             , "    print_int(b);"
@@ -65,13 +70,15 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: if-statement could be a switch [-Wswitch-if]"
-            ]
+            [[ "warning: if-statement could be a switch [-Wswitch-if]"
+             , "   --> test.c:2:7"
+             , "    |"
+             , "   2|   if (b == THE_FOO) {"
+             , "    |       ^"
+             ]]
 
     it "diagnoses a series of if/else-if statements ending in `else` as candidate for switch" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b == THE_FOO) {"
             , "    print_int(b);"
@@ -85,13 +92,15 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: if-statement could be a switch [-Wswitch-if]"
-            ]
+            [[ "warning: if-statement could be a switch [-Wswitch-if]"
+             , "   --> test.c:2:7"
+             , "    |"
+             , "   2|   if (b == THE_FOO) {"
+             , "    |       ^"
+             ]]
 
     it "diagnoses a candidates for switch nested inside another `if`" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b != something) {"
             , "    if (b == THE_FOO) {"
@@ -107,13 +116,15 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:3: if-statement could be a switch [-Wswitch-if]"
-            ]
+            [[ "warning: if-statement could be a switch [-Wswitch-if]"
+             , "   --> test.c:3:9"
+             , "    |"
+             , "   3|     if (b == THE_FOO) {"
+             , "    |         ^"
+             ]]
 
     it "diagnoses a candidates for switch nested inside an `else if`" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "int a(int b) {"
             , "  if (b != something) {"
             , "    /* nop */"
@@ -131,13 +142,15 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:5: if-statement could be a switch [-Wswitch-if]"
-            ]
+            [[ "warning: if-statement could be a switch [-Wswitch-if]"
+             , "   --> test.c:5:9"
+             , "    |"
+             , "   5|     if (b == THE_FOO) {"
+             , "    |         ^"
+             ]]
 
     it "ignores if/else-if statements with different comparison targets" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "int a(int b, int c) {"
             , "  if (b == THE_FOO) {"
             , "    print_int(b);"
@@ -151,4 +164,3 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["switch-if"] ("test.c", ast) `shouldBe` []

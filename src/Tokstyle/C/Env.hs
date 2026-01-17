@@ -1,6 +1,24 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE Strict         #-}
-module Tokstyle.C.Env where
+module Tokstyle.C.Env
+    ( DiagnosticLevel(..)
+    , DiagnosticSpan(..)
+    , CPosition(..)
+    , LinterError
+    , Env(..)
+    , defaultEnv
+    , bracketUserState
+    , getCtx
+    , pushCtx
+    , popCtx
+    , getRetTy
+    , setRetTy
+    , unsetRetTy
+    , recordLinterError
+    , recordRichError
+    , safePosFile
+    , posAndLen
+    ) where
 
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
@@ -9,32 +27,27 @@ import           Language.C.Analysis.SemRep    (GlobalDecls, Type)
 import           Language.C.Analysis.TravMonad (Trav, getUserState,
                                                 modifyUserState)
 import           Language.C.Data.Ident         (Ident, SUERef)
-import           Language.C.Data.Node          (NodeInfo (..), nodeInfo,
-                                                posOfNode)
-import           Language.C.Data.Position      (Position, posColumn, posFile,
-                                                posRow)
+import           Language.C.Data.Node          (NodeInfo (..), nodeInfo)
+import           Language.C.Data.Position      as C
+import           Language.Cimple.Diagnostics   (Diagnostic (..),
+                                                DiagnosticLevel (..),
+                                                DiagnosticSpan (..),
+                                                IsPosition (..))
 import           Prettyprinter                 (Doc)
+
 import           Prettyprinter.Render.Terminal (AnsiStyle)
 import           Tokstyle.C.TravUtils          (getJust)
 
-data DiagnosticLevel = ErrorLevel | WarningLevel | NoteLevel | HelpLevel
+newtype CPosition = CPosition { unCPosition :: Position }
     deriving (Show, Eq)
 
-data DiagnosticSpan = DiagnosticSpan
-    { spanPos    :: Position
-    , spanLen    :: Int
-    , spanLabels :: [Doc AnsiStyle]
-    }
+instance IsPosition CPosition where
+    posFile = C.posFile . unCPosition
+    posLine = C.posRow . unCPosition
+    posColumn = C.posColumn . unCPosition
+    isRealPos = C.isSourcePos . unCPosition
 
-data LinterError = LinterError
-    { linterErrorPos    :: Position
-    , linterErrorLen    :: Int
-    , linterErrorLevel  :: DiagnosticLevel
-    , linterErrorMsg    :: Doc AnsiStyle
-    , linterErrorFlag   :: Maybe Text
-    , linterErrorSpans  :: [DiagnosticSpan]
-    , linterErrorFooter :: [(DiagnosticLevel, Doc AnsiStyle)]
-    }
+type LinterError = Diagnostic CPosition
 
 data Env = Env
     { ctx           :: [String]
@@ -81,12 +94,20 @@ unsetRetTy = modifyUserState $ \env -> env{retTy = Nothing}
 recordLinterError :: NodeInfo -> Doc AnsiStyle -> Trav Env ()
 recordLinterError info doc = modifyUserState $ \env ->
     let (pos, len) = posAndLen info
-    in env{linterErrors = LinterError pos len ErrorLevel doc (currentFlag env) [] [] : linterErrors env}
+    in env{linterErrors = Diagnostic (CPosition pos) len ErrorLevel doc (currentFlag env) [] [] : linterErrors env}
 
-recordRichError :: NodeInfo -> DiagnosticLevel -> Doc AnsiStyle -> [DiagnosticSpan] -> [(DiagnosticLevel, Doc AnsiStyle)] -> Trav Env ()
+recordRichError :: NodeInfo -> DiagnosticLevel -> Doc AnsiStyle -> [DiagnosticSpan Position] -> [(DiagnosticLevel, Doc AnsiStyle)] -> Trav Env ()
 recordRichError info level msg spans footer = modifyUserState $ \env ->
     let (pos, len) = posAndLen info
-    in env{linterErrors = LinterError pos len level msg (currentFlag env) spans footer : linterErrors env}
+        wrapSpan s = s { spanPos = CPosition (spanPos s) }
+    in env{linterErrors = Diagnostic (CPosition pos) len level msg (currentFlag env) (map wrapSpan spans) footer : linterErrors env}
+
+safePosFile :: Position -> String
+safePosFile p | C.isSourcePos p = C.posFile p
+              | isNoPos p = "<no file>"
+              | isBuiltinPos p = "<builtin>"
+              | isInternalPos p = "<internal>"
+              | otherwise = "<unknown>"
 
 posAndLen :: NodeInfo -> (Position, Int)
 posAndLen info = case nodeInfo info of
@@ -94,6 +115,6 @@ posAndLen info = case nodeInfo info of
     OnlyPos pos (lastPos, lastLen)    -> (pos, calcLen pos lastPos lastLen)
   where
     calcLen pos lastPos lastLen =
-        if posFile pos == posFile lastPos && posRow pos == posRow lastPos
-        then (posColumn lastPos + lastLen) - posColumn pos
+        if C.isSourcePos pos && C.isSourcePos lastPos && safePosFile pos == safePosFile lastPos && C.posRow pos == C.posRow lastPos
+        then (C.posColumn lastPos + lastLen) - C.posColumn pos
         else lastLen

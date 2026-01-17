@@ -1,6 +1,7 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Strict            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE Strict                #-}
 module Tokstyle.Common.EnumLinter
     ( EnumInfo (..)
     , MkFunBody
@@ -16,11 +17,13 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), LexemeClass (..),
                                               Node, NodeF (..))
-import           Language.Cimple.Diagnostics (HasDiagnostics (..), warn)
-import           Language.Cimple.Pretty      (ppTranslationUnit, render)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+                                              HasDiagnosticsRich (..))
+import           Language.Cimple.Pretty      (ppTranslationUnit)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
-import           Tokstyle.Common             (semEq)
+import           Prettyprinter               (line, pretty)
+import           Tokstyle.Common             (semEq, warn, warnDoc)
 
 data EnumInfo = EnumInfo
     { enumName    :: Text
@@ -30,12 +33,12 @@ data EnumInfo = EnumInfo
 type SymbolTable = [(Text, EnumInfo)]
 
 data Linter = Linter
-    { diags :: [Text]
+    { diags :: [Diagnostic CimplePos]
     , types :: SymbolTable
     }
 
-instance HasDiagnostics Linter where
-    addDiagnostic diag l@Linter{diags} = l{diags = addDiagnostic diag diags}
+instance HasDiagnosticsRich Linter CimplePos where
+    addDiagnosticRich diag l@Linter{diags} = l{diags = diag : diags}
 
 empty :: Linter
 empty = Linter [] []
@@ -79,13 +82,13 @@ checkEnums funSuffix mkFunBody = traverseAst actions
                                     warn file node $ "invalid enum format for `" <> ename <> "`"
                                 Just wanted ->
                                     unless (body `semEq` wanted) $
-                                        warn file node $ "enum `" <> funSuffix <> "` function for `" <> ename <> "` should be:\n"
-                                            <> render (ppTranslationUnit [wanted])
+                                        warnDoc file node $ "enum `" <> pretty funSuffix <> "` function for `" <> pretty ename <> "` should be:" <> line
+                                            <> ppTranslationUnit [wanted]
 
                 _ -> act
         }
 
 
-analyseEnums :: Text -> MkFunBody -> [(FilePath, [Node (Lexeme Text)])] -> [Text]
+analyseEnums :: Text -> MkFunBody -> [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyseEnums funSuffix mkFunBody =
     reverse . diags . flip State.execState empty . (\tus -> collectEnums tus >> checkEnums funSuffix mkFunBody tus) . reverse

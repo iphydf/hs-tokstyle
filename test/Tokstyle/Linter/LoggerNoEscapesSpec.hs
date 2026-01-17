@@ -1,41 +1,45 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.LoggerNoEscapesSpec where
+module Tokstyle.Linter.LoggerNoEscapesSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["logger-no-escapes"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["logger-no-escapes"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid logger calls" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  LOGGER_INFO(log, \"foo\");"
             , "}"
             ]
-        analyseLocal ["logger-no-escapes"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid logger calls" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void foo(void) {"
             , "  LOGGER_INFO(log, \"foo\\n\");"
             , "}"
             ]
-        analyseLocal ["logger-no-escapes"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:2: logger format \"foo\\n\" contains escape sequences (newlines, tabs, or escaped quotes) [-Wlogger-no-escapes]"
-            ]
+            [[ "warning: logger format \"foo\\n\" contains escape sequences (newlines, tabs, or escaped quotes) [-Wlogger-no-escapes]"
+             , "   --> test.c:2:20"
+             , "    |"
+             , "   2|   LOGGER_INFO(log, \"foo\\n\");"
+             , "    |                    ^^^^^^^"
+             ]]
 
     it "should not give diagnostics on LOGGER_ASSERT" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  LOGGER_ASSERT(log, 1, \"foo\");"
             , "}"
             ]
-        analyseLocal ["logger-no-escapes"] ("test.c", ast)
-            `shouldBe`
-            []

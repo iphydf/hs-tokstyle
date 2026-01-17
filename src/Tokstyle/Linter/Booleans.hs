@@ -10,9 +10,10 @@ import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme, LiteralType (..), Node,
                                               NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Tokstyle.Common             (warn)
 
 pattern ReturnBool, OnlyReturnBool :: Node a
 -- | `return true` or `return false`.
@@ -20,7 +21,7 @@ pattern ReturnBool <- Fix (Return (Just (Fix (LiteralExpr Bool _))))
 -- | A compound statement with only a return true/false in it.
 pattern OnlyReturnBool <- Fix (CompoundStmt [ReturnBool])
 
-checkStmts :: FilePath -> [Node (Lexeme Text)] -> State [Text] ()
+checkStmts :: FilePath -> [Node (Lexeme Text)] -> State [Diagnostic CimplePos] ()
 checkStmts _ [] = return ()
 checkStmts file [s@(Fix (IfStmt _ OnlyReturnBool Nothing)), ReturnBool] =
     warn file s "if-statement followed by boolean return can be simplified to return"
@@ -29,7 +30,7 @@ checkStmts file [s@(Fix (IfStmt _ OnlyReturnBool (Just OnlyReturnBool)))] =
 checkStmts file (_:ss) = checkStmts file ss
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -43,10 +44,10 @@ linter = astActions
   where
     message = "boolean constants should not appear in binary expressions (use ! for negation)"
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("booleans", Text.unlines
     [ "Checks for if/else statements that return true/false and could be simplified to"
     , "just return. E.g.:"

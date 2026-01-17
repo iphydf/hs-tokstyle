@@ -1,16 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.Linter.NestingSpec where
+module Tokstyle.Linter.NestingSpec (spec) where
 
-import           Test.Hspec          (Spec, it, shouldBe)
+import           Data.Text           (Text)
+import           Test.Hspec          (Spec, it)
 
-import           Tokstyle.Linter     (analyseLocal)
-import           Tokstyle.LinterSpec (mustParse)
+import           Tokstyle.LinterSpec (shouldAcceptLocal, shouldWarnLocal)
+
+
+shouldWarn' :: [Text] -> [[Text]] -> IO ()
+shouldWarn' = shouldWarnLocal ["nesting"]
+
+
+shouldAccept' :: [Text] -> IO ()
+shouldAccept' = shouldAcceptLocal ["nesting"]
 
 
 spec :: Spec
 spec = do
     it "should not give diagnostics on valid nesting" $ do
-        ast <- mustParse
+        shouldAccept'
             [ "void foo(void) {"
             , "  if (1) {"
             , "    if (2) {"
@@ -27,12 +35,9 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["nesting"] ("test.c", ast)
-            `shouldBe`
-            []
 
     it "should give diagnostics on invalid nesting" $ do
-        ast <- mustParse
+        shouldWarn'
             [ "void foo(void) {"
             , "  if (1) {"
             , "    if (2) {"
@@ -51,7 +56,9 @@ spec = do
             , "  }"
             , "}"
             ]
-        analyseLocal ["nesting"] ("test.c", ast)
-            `shouldBe`
-            [ "test.c:1: function is too deeply nested: 8 is deeper than the maximum allowed of 7; consider inversion or extraction [-Wnesting]"
-            ]
+            [[ "warning: function is too deeply nested: 8 is deeper than the maximum allowed of 7; consider inversion or extraction [-Wnesting]"
+             , "   --> test.c:1:1"
+             , "    |"
+             , "   1| void foo(void) {"
+             , "    | ^^^^^^^^^^^^^^^^"
+             ]]

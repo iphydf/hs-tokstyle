@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -19,13 +20,15 @@ import qualified Data.Text                   as Text
 import           Language.Cimple             (AssignOp (..), Lexeme (..), Node,
                                               NodeF (..), UnaryOp (..),
                                               lexemeText)
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
 import           Lens.Micro                  (over, set, (^.))
 import           Lens.Micro.TH               (makeLenses, makeLensesFor)
+import           Prettyprinter               (pretty, (<+>))
 import           Text.Groom                  (groom)
 import qualified Tokstyle.Common             as Common
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 data Action
@@ -268,7 +271,7 @@ varScopes = \case
     inLoop = Map.map (set (varOp.opFlags.flgLoop) True)
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
@@ -280,16 +283,16 @@ linter = astActions
   where
       warnAbout file _ | "cmp.c" `isSuffixOf` file = return ()
       warnAbout file (Var (Operation Reduce _) (Just decl) (Just use)) = do
-          warn file decl $ "variable `" <> lexemeText decl <> "` can be reduced in scope"
-          warn file use    "  possibly to here"
+          warnDoc file decl $ "variable" <+> backticks (pretty (lexemeText decl)) <+> "can be reduced in scope"
+          warnDoc file use    "  possibly to here"
       warnAbout _ _ = return ()
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter . Common.skip
     [ "third_party/cmp/cmp.c"
     ]
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("var-unused-in-scope", Text.unlines
     [ "Suggests reducing the scope of a local variable definition when possible."
     , ""

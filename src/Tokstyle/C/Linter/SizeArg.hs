@@ -1,11 +1,12 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Strict            #-}
-module Tokstyle.C.Linter.SizeArg (analyse) where
+module Tokstyle.C.Linter.SizeArg (descr) where
 
 import           Data.Functor.Identity           (Identity)
 import qualified Data.List                       as List
 import qualified Data.Map                        as Map
+import           Data.Text                       (Text)
 import           Language.C.Analysis.AstAnalysis (ExprSide (..), defaultMD,
                                                   tExpr)
 import           Language.C.Analysis.ConstEval   (constEval, intValue)
@@ -19,11 +20,12 @@ import           Language.C.Data.Ident           (Ident (..))
 import qualified Language.C.Pretty               as C
 import           Language.C.Syntax.AST           (CExpr, CExpression (..),
                                                   annotation)
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env, recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 
 checkArraySizes :: Ident -> [(ParamDecl, CExpr, Type)] -> Trav Env ()
@@ -37,10 +39,10 @@ checkArraySizes funId ((_, _, arrTy@(ArrayTypeSize arrSize)):(ParamName sizePara
             case (arrSizeVal, sizeArgVal) of
                 (Just arrSizeConst, Just sizeArgConst) | arrSizeConst < sizeArgConst ->
                     recordLinterError (annotation sizeArg) $
-                        "size parameter `" <> pretty sizeParam <> "` is passed constant value `"
-                        <> pretty (show (C.pretty sizeArg)) <> "` (= " <> pretty sizeArgConst <> "),\n"
-                        <> "  which is greater than the array size of `" <> pretty (show (C.pretty arrTy)) <> "`,\n"
-                        <> "  potentially causing buffer overrun in `" <> pretty (show (C.pretty funId)) <> "`"
+                        "size parameter" <+> backticks (pretty sizeParam) <+> "is passed constant value" <+> backticks (pretty (show (C.pretty sizeArg)))
+                        <+> "(= " <> pretty sizeArgConst <> "),\n"
+                        <> "  which is greater than the array size of" <+> backticks (pretty (show (C.pretty arrTy))) <> ",\n"
+                        <> "  potentially causing buffer overrun in" <+> backticks (pretty (show (C.pretty funId)))
                 _ -> return ()  -- not constant, or array size greater than size arg
             checkArraySizes funId args
         ) $ const $ return ()
@@ -66,3 +68,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("size-arg", "Checks that the size argument passed to a function matches the array size of the preceding argument."))

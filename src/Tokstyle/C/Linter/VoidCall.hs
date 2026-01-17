@@ -2,11 +2,12 @@
 {-# LANGUAGE PatternSynonyms   #-}
 {-# LANGUAGE Strict            #-}
 {-# OPTIONS_GHC -Wwarn #-}
-module Tokstyle.C.Linter.VoidCall (analyse) where
+module Tokstyle.C.Linter.VoidCall (descr) where
 
 import           Data.Functor.Identity           (Identity)
 import           Data.List                       (isPrefixOf)
 import           Data.Maybe                      (mapMaybe)
+import           Data.Text                       (Text)
 import           Language.C                      (Annotated (annotation),
                                                   CCompoundBlockItem (CBlockDecl),
                                                   CDeclaration (CDecl),
@@ -24,13 +25,14 @@ import           Language.C.Analysis.SemRep      (FunDef (..), FunType (..),
                                                   VarDecl (..), VarName (..))
 import           Language.C.Analysis.TravMonad   (Trav, TravT)
 import           Language.C.Data.Ident           (Ident (Ident))
-import           Prettyprinter                   (pretty)
+import           Prettyprinter                   (pretty, (<+>))
 import           Tokstyle.C.Env                  (Env (params),
                                                   bracketUserState,
                                                   recordLinterError)
 import           Tokstyle.C.Patterns
 import           Tokstyle.C.TraverseAst          (AstActions (..), astActions,
                                                   traverseAst)
+import           Tokstyle.C.TravUtils            (backticks)
 
 voidPtrParams :: [ParamDecl] -> [Ident]
 voidPtrParams = mapMaybe isVoidPtr
@@ -61,7 +63,7 @@ linter = astActions
             case srcTy of
                 TY_void_ptr ->
                     recordLinterError (annotation node) $
-                        "first statement must cast `void *" <> pretty (idName n) <> "` to `" <> pretty (show (C.pretty dstTy)) <> "`"
+                        "first statement must cast" <+> backticks ("void *" <> pretty (idName n)) <+> "to" <+> backticks (pretty (show (C.pretty dstTy)))
                 _ -> return ()
 
         _ -> act
@@ -81,3 +83,7 @@ linter = astActions
 
 analyse :: GlobalDecls -> Trav Env ()
 analyse = traverseAst linter
+
+
+descr :: (GlobalDecls -> Trav Env (), (Text, Text))
+descr = (analyse, ("void-call", "Checks that the first statement of a function with a `void*` parameter casts it to a specific type."))

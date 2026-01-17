@@ -9,14 +9,16 @@ import           Data.Fix                    (Fix (..))
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..))
-import           Language.Cimple.Diagnostics (warn)
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
+import           Prettyprinter               (pretty, (<+>))
+import           Tokstyle.Common             (backticks, warn, warnDoc)
 
 
 allowed :: [Text]
 allowed =
-    [ "callback"
+    ["callback"
     , "cb"
     , "function"
     , "handler"
@@ -26,27 +28,27 @@ isValid :: Text -> Bool
 isValid name = any (`Text.isSuffixOf` name) allowed
 
 
-linter :: AstActions (State [Text]) Text
+linter :: AstActions (State [Diagnostic CimplePos]) Text
 linter = astActions
     { doNode = \file node act ->
         case unFix node of
             VarDecl (Fix (TyPointer (Fix TyFunc{}))) (L _ _ varName) _ ->
                 unless (isValid varName) $
-                    warn file node $ "function pointer `" <> varName <> "` should end in `callback`"
+                    warnDoc file node $ "function pointer" <+> backticks (pretty varName) <+> "should end in `callback`"
 
             VarDecl (Fix TyFunc{}) (L _ _ varName) _ ->
                 unless (isValid varName) $
-                    warn file node $ "function pointer parameter `" <> varName <> "` should end in `callback`"
+                    warnDoc file node $ "function pointer parameter" <+> backticks (pretty varName) <+> "should end in `callback`"
 
             _ -> act
     }
 
-analyse :: (FilePath, [Node (Lexeme Text)]) -> [Text]
+analyse :: (FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos]
 analyse = reverse . flip State.execState [] . traverseAst linter
 
-descr :: ((FilePath, [Node (Lexeme Text)]) -> [Text], (Text, Text))
+descr :: ((FilePath, [Node (Lexeme Text)]) -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("callback-names", Text.unlines
-    [ "Checks for naming conventions for callbacks. Callback names should end in"
+    ["Checks for naming conventions for callbacks. Callback names should end in"
     , "`callback`, but the following list of suffixes is permitted:"
     , ""
     , Text.intercalate "\n" . map (\x -> "- `" <> x <> "`") $ allowed
