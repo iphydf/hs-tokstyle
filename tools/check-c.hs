@@ -4,11 +4,11 @@ module Main (main) where
 
 import           Control.Monad                 (unless)
 import qualified Control.Monad.Parallel        as Par
-import           Data.List                     (isPrefixOf)
+import           Data.List                     (isPrefixOf, isSuffixOf)
 import           Data.Text                     (Text)
 import qualified Data.Text                     as Text
 import qualified Data.Text.IO                  as Text
-import           Language.C                    (parseCFile)
+import           Language.C                    (parseCFile, parseCFilePre)
 import           Language.C.System.GCC         (newGCC)
 import           Options.Applicative
 import           Prettyprinter                 (Doc, defaultLayoutOptions,
@@ -65,7 +65,9 @@ defaultCppOpts sysInclude =
 
 processFile :: String -> String -> [Text] -> [String] -> FilePath -> IO (Bool, [Doc AnsiStyle])
 processFile cc sysInclude flags cppOpts file = do
-    result <- parseCFile (newGCC cc) Nothing (defaultCppOpts sysInclude ++ cppOpts) file
+    result <- if ".i" `isSuffixOf` file
+              then parseCFilePre file
+              else parseCFile (newGCC cc) Nothing (defaultCppOpts sysInclude ++ cppOpts) file
     case result of
         Left err -> return (False, [pretty file <> ": Parse Error: " <> pretty (show err)])
         Right tu -> do

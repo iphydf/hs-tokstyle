@@ -58,6 +58,13 @@ builtinPackFunName U64Ty  = Just "bin_pack_u64"
 builtinPackFunName S64Ty  = Just "bin_pack_s64"
 builtinPackFunName _      = Nothing
 
+stripWrappers :: TypeInfo -> TypeInfo
+stripWrappers (Owner ty)    = stripWrappers ty
+stripWrappers (Nonnull ty)  = stripWrappers ty
+stripWrappers (Nullable ty) = stripWrappers ty
+stripWrappers (Const ty)    = stripWrappers ty
+stripWrappers ty            = ty
+
 packFunName :: TypeInfo -> Maybe (Either Text (Node (Lexeme Text) -> Node (Lexeme Text), Text))
 packFunName (BuiltinType ty) =
     Left <$> builtinPackFunName ty
@@ -73,49 +80,58 @@ packFunName (TypeRef UnionRef _) = Nothing  -- TODO(iphydf): Union pack.
 packFunName (Owner ty)           = packFunName ty
 packFunName (Nonnull ty)         = packFunName ty
 packFunName (Nullable ty)        = packFunName ty
+packFunName (Const ty)           = packFunName ty
 packFunName x                    = error $ show x
 
 -- bin_pack_bin(bp, var->mem, size)
-mkPackBin :: Lexeme Text -> Lexeme Text -> Node (Lexeme Text) -> Node (Lexeme Text)
-mkPackBin varName memName size =
-    Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar "bin_pack_bin")))
+mkPackBinStr :: Text -> Lexeme Text -> Lexeme Text -> Node (Lexeme Text) -> Node (Lexeme Text)
+mkPackBinStr fun varName memName size =
+    Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar fun)))
         [ Fix (VarExpr (mkLAt memName IdVar "bp"))
         , Fix (PointerAccess (Fix (VarExpr varName)) memName)
         , size
         ])
 
-mkPackMember :: Lexeme Text -> (Lexeme Text, TypeInfo) -> Maybe (Node (Lexeme Text))
-mkPackMember varName (memName, Owner ty) = mkPackMember varName (memName, ty)
-mkPackMember varName (memName, Nonnull ty) = mkPackMember varName (memName, ty)
-mkPackMember varName (memName, Nullable ty) = mkPackMember varName (memName, ty)
-mkPackMember varName (memName, Sized (Pointer (BuiltinType U08Ty)) arrSize) = Just $
-    mkPackBin varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
-mkPackMember varName (memName, Sized (Owner (Pointer (BuiltinType U08Ty))) arrSize) = Just $
-    mkPackBin varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
-mkPackMember varName (memName, Sized (Nonnull (Pointer (BuiltinType U08Ty))) arrSize) = Just $
-    mkPackBin varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
-mkPackMember varName (memName, Sized (Nullable (Pointer (BuiltinType U08Ty))) arrSize) = Just $
-    mkPackBin varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
-mkPackMember varName (memName, Sized (Array (Just (BuiltinType U08Ty)) _) arrSize) = Just $
-    mkPackBin varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
-mkPackMember varName (memName, Array (Just (BuiltinType U08Ty)) [NameLit arrSize]) = Just $
-    mkPackBin varName memName $ Fix (LiteralExpr ConstId arrSize)
-mkPackMember varName (memName, Array (Just (BuiltinType U08Ty)) [IntLit arrSize]) = Just $
-    mkPackBin varName memName $ Fix (LiteralExpr Int arrSize)
-mkPackMember varName (memName, memType) = do
-    funName <- packFunName memType
-    return $ case funName of
-        Left fun ->
-            Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar fun)))
-                [ Fix (VarExpr (mkLAt memName IdVar "bp"))
-                , Fix (PointerAccess (Fix (VarExpr varName)) memName)
-                ])
-        Right (prefix, fun) ->
-            Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar fun)))
-                [ prefix (Fix (PointerAccess (Fix (VarExpr varName)) memName))
-                , Fix (VarExpr (mkLAt memName IdVar "bp"))
-                ])
+getPackFn :: StdType -> Maybe (Lexeme Text -> Lexeme Text -> Node (Lexeme Text) -> Node (Lexeme Text))
+getPackFn U08Ty  = Just (mkPackBinStr "bin_pack_bin")
+getPackFn CharTy = Just (mkPackBinStr "bin_pack_str")
+getPackFn _      = Nothing
 
+mkPackMember :: Lexeme Text -> (Lexeme Text, TypeInfo) -> Maybe (Node (Lexeme Text))
+mkPackMember varName (memName, ty) = case ty of
+    Owner t    -> mkPackMember varName (memName, t)
+    Nonnull t  -> mkPackMember varName (memName, t)
+    Nullable t -> mkPackMember varName (memName, t)
+    Const t    -> mkPackMember varName (memName, t)
+
+    Sized t arrSize -> do
+        packFn <- case stripWrappers t of
+            Pointer (BuiltinType std)        -> getPackFn std
+            Array (Just (BuiltinType std)) _ -> getPackFn std
+            _                                -> Nothing
+        return $ packFn varName memName $ Fix (PointerAccess (Fix (VarExpr varName)) arrSize)
+
+    Array (Just (BuiltinType std)) [NameLit arrSize] -> do
+        packFn <- getPackFn std
+        return $ packFn varName memName $ Fix (LiteralExpr ConstId arrSize)
+
+    Array (Just (BuiltinType std)) [IntLit arrSize] -> do
+        packFn <- getPackFn std
+        return $ packFn varName memName $ Fix (LiteralExpr Int arrSize)
+
+    _ -> do
+        funName <- packFunName ty
+        return $ case funName of
+            Left fun ->
+                Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar fun)))
+                    [ Fix (VarExpr (mkLAt memName IdVar "bp"))
+                    , Fix (PointerAccess (Fix (VarExpr varName)) memName)
+                    ])
+            Right (prefix, fun) ->
+                Fix (FunctionCall (Fix (VarExpr (mkLAt memName IdVar fun)))
+                    [ prefix (Fix (PointerAccess (Fix (VarExpr varName)) memName))
+                    , Fix (VarExpr (mkLAt memName IdVar "bp"))
+                    ])
 
 analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse = analyseStructs funSuffix mkFunBody
