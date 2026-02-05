@@ -9,8 +9,68 @@ project(
 )
 
 haskell_library(
+    name = "common",
+    srcs = [
+        "src/Tokstyle/Analysis/AccessPath.hs",
+        "src/Tokstyle/Analysis/Dataflow.hs",
+        "src/Tokstyle/Analysis/Symbolic.hs",
+        "src/Tokstyle/Common.hs",
+    ] + glob(["src/Tokstyle/Common/**/*.hs"]),
+    ghcopts = [
+        "-j4",
+    ],
+    src_strip_prefix = "src",
+    tags = [
+        "haskell",
+        "no-cross",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//hs-cimple",
+        "//third_party/haskell:base",
+        "//third_party/haskell:containers",
+        "//third_party/haskell:data-fix",
+        "//third_party/haskell:mtl",
+        "//third_party/haskell:prettyprinter",
+        "//third_party/haskell:prettyprinter-ansi-terminal",
+        "//third_party/haskell:text",
+    ],
+)
+
+haskell_library(
+    name = "analysis",
+    srcs = [
+        "src/Tokstyle/Cimple/Analysis/CFG.hs",
+        "src/Tokstyle/Cimple/Analysis/Liveness.hs",
+    ] + glob(["src/Tokstyle/C/Analysis/**/*.hs"]),
+    ghcopts = [
+        "-j4",
+    ],
+    src_strip_prefix = "src",
+    tags = [
+        "haskell",
+        "no-cross",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":common",
+        "//hs-cimple",
+        "//third_party/haskell:base",
+        "//third_party/haskell:containers",
+        "//third_party/haskell:data-fix",
+        "//third_party/haskell:language-c",
+        "//third_party/haskell:mtl",
+        "//third_party/haskell:prettyprinter",
+        "//third_party/haskell:text",
+    ],
+)
+
+haskell_library(
     name = "c-linters",
-    srcs = glob(["src/Tokstyle/C/**/*.*hs"]),
+    srcs = glob(
+        ["src/Tokstyle/C/**/*.hs"],
+        exclude = ["src/Tokstyle/C/Analysis/**"],
+    ),
     ghcopts = [
         "-j4",
         "-Wno-error=unused-matches",
@@ -23,6 +83,8 @@ haskell_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":analysis",
+        ":common",
         "//hs-cimple",
         "//third_party/haskell:base",
         "//third_party/haskell:bytestring",
@@ -40,7 +102,13 @@ haskell_library(
     name = "hs-tokstyle",
     srcs = glob(
         ["src/**/*.hs"],
-        exclude = ["src/Tokstyle/C/**"],
+        exclude = [
+            "src/Tokstyle/Analysis/**",
+            "src/Tokstyle/C/**",
+            "src/Tokstyle/Cimple/Analysis/**",
+            "src/Tokstyle/Common/**",
+            "src/Tokstyle/Common.hs",
+        ],
     ),
     ghcopts = [
         "-j4",
@@ -55,6 +123,8 @@ haskell_library(
     version = "0.0.9",
     visibility = ["//visibility:public"],
     deps = [
+        ":analysis",
+        ":common",
         "//hs-cimple",
         "//third_party/haskell:aeson",
         "//third_party/haskell:array",
@@ -88,9 +158,12 @@ hspec_test(
         "-Wno-unused-matches",
     ],
     deps = [
+        ":analysis",
         ":c-linters",
+        ":common",
         ":hs-tokstyle",
         "//hs-cimple",
+        "//third_party/haskell:QuickCheck",
         "//third_party/haskell:base",
         "//third_party/haskell:containers",
         "//third_party/haskell:data-fix",

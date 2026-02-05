@@ -9,25 +9,35 @@
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 module Tokstyle.Linter.Nullability (descr) where
 
-import           Control.Monad               (forM_, when)
-import           Control.Monad.State.Strict  (State)
-import qualified Control.Monad.State.Strict  as State
-import           Data.Fix                    (Fix (..))
-import           Data.Foldable               (traverse_)
-import           Data.Map.Strict             (Map)
-import qualified Data.Map.Strict             as Map
-import           Data.Set                    (Set)
-import qualified Data.Set                    as Set
-import           Data.Text                   (Text)
-import qualified Data.Text                   as Text
-import           Language.Cimple             (BinaryOp (..), Lexeme (..), Node,
-                                              UnaryOp (..))
-import qualified Language.Cimple             as C
-import           Language.Cimple.Diagnostics (CimplePos, Diagnostic)
-import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
-                                              traverseAst)
-import           Prettyprinter               (pretty, (<+>))
-import           Tokstyle.Common             (backticks, warn, warnDoc)
+import           Control.Monad                (foldM, forM_, unless, void, when)
+import           Control.Monad.State.Strict   (State)
+import qualified Control.Monad.State.Strict   as State
+import           Data.Fix                     (Fix (..), unFix)
+import           Data.Foldable                (traverse_)
+import           Data.List                    (find)
+import           Data.Map.Strict              (Map)
+import qualified Data.Map.Strict              as Map
+import           Data.Maybe                   (fromMaybe)
+import           Data.Set                     (Set)
+import qualified Data.Set                     as Set
+import           Data.Text                    (Text)
+import qualified Data.Text                    as Text
+import           Language.Cimple              (AssignOp (..), BinaryOp (..),
+                                               Lexeme (..), NodeF (..),
+                                               UnaryOp (..))
+import qualified Language.Cimple              as C
+import           Language.Cimple.Diagnostics  (CimplePos, Diagnostic)
+import           Language.Cimple.Pretty       (ppNode)
+import           Language.Cimple.TraverseAst  (AstActions, astActions, doNode,
+                                               traverseAst)
+import           Prettyprinter                (pretty, (<+>))
+import           Tokstyle.Analysis.AccessPath
+import           Tokstyle.Analysis.Dataflow   (Dataflow (..), solve)
+import qualified Tokstyle.Analysis.Symbolic   as S
+import           Tokstyle.Cimple.Analysis.CFG (CFG, EdgeType (..), Node (..),
+                                               NodeKind (..), fromFunction,
+                                               getFuncName)
+import           Tokstyle.Common              (backticks, functionName, warnDoc)
 
 data Nullability
     = NullableVar
@@ -35,50 +45,63 @@ data Nullability
     | UnspecifiedNullability
     deriving (Show, Eq, Ord)
 
-type VarInfo = (Nullability, Maybe (Node (Lexeme Text)))
+type VarInfo = (Nullability, Maybe (C.Node (Lexeme Text)))
 
 type TypeEnv = Map Text VarInfo
 
 data LinterState = LinterState
-    { typeEnv      :: TypeEnv
-    , structDefs   :: Map Text TypeEnv
-    , functionDefs :: Map Text (Nullability, [Nullability])
-    , nonNullSet   :: Set Text
-    , currentFile  :: FilePath
+    { typeEnv        :: TypeEnv
+    , structDefs     :: Map Text TypeEnv
+    , functionDefs   :: Map Text (Nullability, [Nullability])
+    , currentFile    :: FilePath
+    , currentFuncRet :: Nullability
     }
 
 type LinterM = State.StateT LinterState (State [Diagnostic CimplePos])
 
-isNullable :: Node (Lexeme Text) -> Bool
-isNullable = \case
-    Fix (C.TyNullable _) -> True
-    Fix (C.TyPointer t)  -> isNullable t
-    Fix (C.TyConst t)    -> isNullable t
-    _                    -> False
+isNullable :: C.Node (Lexeme Text) -> Bool
+isNullable (Fix node) = case node of
+    C.TyNullable _  -> True
+    C.TyPointer t   -> isNullable t
+    C.TyConst t     -> isNullable t
+    C.TyForce t     -> isNullable t
+    C.VarDecl t _ _ -> isNullable t
+    _               -> False
 
-isNonnull :: Node (Lexeme Text) -> Bool
-isNonnull = \case
-    Fix (C.TyNonnull _) -> True
-    Fix (C.TyPointer t) -> isNonnull t
-    Fix (C.TyConst t)   -> isNonnull t
-    _                   -> False
+isNonnull :: C.Node (Lexeme Text) -> Bool
+isNonnull (Fix node) = case node of
+    C.TyNonnull _   -> True
+    C.TyPointer t   -> isNonnull t
+    C.TyConst t     -> isNonnull t
+    C.TyForce t     -> isNonnull t
+    C.VarDecl t _ _ -> isNonnull t
+    _               -> False
 
-exprToText :: Node (Lexeme Text) -> Maybe Text
-exprToText (Fix node) = case node of
-    C.VarExpr (C.L _ _ name) -> Just name
-    C.PointerAccess e (C.L _ _ member) -> do
-        base <- exprToText e
-        Just $ base <> "->" <> member
-    C.MemberAccess e (C.L _ _ member) -> do
-        base <- exprToText e
-        Just $ base <> "." <> member
-    C.UnaryExpr C.UopDeref e -> do
-        base <- exprToText e
-        Just $ "*" <> base
-    C.ParenExpr e -> exprToText e
+isPointerType :: C.Node (Lexeme Text) -> Bool
+isPointerType (Fix node) = case node of
+    C.TyPointer _     -> True
+    C.TyNullable t    -> isPointerType t
+    C.TyNonnull t     -> isPointerType t
+    C.TyConst t       -> isPointerType t
+    C.TyForce t       -> isPointerType t
+    C.VarDecl t _ _   -> isPointerType t
+    C.TyStd _         -> False
+    C.TyStruct _      -> False
+    C.TyUnion _       -> False
+    C.TyUserDefined _ -> True -- Assume pointers can be hidden in typedefs if we don't know
+    _                 -> False
+
+exprToPath :: C.Node (Lexeme Text) -> Maybe AccessPath
+exprToPath (Fix node) = case node of
+    C.VarExpr (C.L _ _ name) -> Just $ PathVar (Text.unpack name)
+    C.PointerAccess e (C.L _ _ member) -> PathField <$> exprToPath e <*> pure (Text.unpack member)
+    C.MemberAccess e (C.L _ _ member) -> PathField <$> exprToPath e <*> pure (Text.unpack member)
+    C.ArrayAccess e (Fix (C.LiteralExpr C.Int (C.L _ _ idx))) -> PathField <$> exprToPath e <*> pure (Text.unpack idx)
+    C.UnaryExpr C.UopDeref e -> PathDeref <$> exprToPath e
+    C.ParenExpr e -> exprToPath e
     _ -> Nothing
 
-getParamTypes :: Node (Lexeme Text) -> [(Text, VarInfo)]
+getParamTypes :: C.Node (Lexeme Text) -> [(Text, VarInfo)]
 getParamTypes (Fix (C.FunctionPrototype _ _ params)) = concatMap getVarDecls $ params
   where
     getVarDecls decl@(Fix (C.VarDecl ty (C.L _ _ name) _)) =
@@ -86,268 +109,296 @@ getParamTypes (Fix (C.FunctionPrototype _ _ params)) = concatMap getVarDecls $ p
     getVarDecls _ = []
 getParamTypes _ = []
 
-getNullability' :: Node (Lexeme Text) -> Nullability
+getNullability' :: C.Node (Lexeme Text) -> Nullability
 getNullability' ty
   | isNullable ty = NullableVar
   | isNonnull ty  = NonNullVar
   | otherwise     = UnspecifiedNullability
 
-getStructName :: Node (Lexeme Text) -> Maybe Text
+getStructName :: C.Node (Lexeme Text) -> Maybe Text
 getStructName (Fix node) = case node of
+    C.VarDecl ty _ _               -> getStructName ty
     C.TyPointer t                  -> getStructName t
     C.TyConst t                    -> getStructName t
     C.TyNonnull t                  -> getStructName t
+    C.TyNullable t                 -> getStructName t
     C.TyStruct (C.L _ _ name)      -> Just name
     C.TyUserDefined (C.L _ _ name) -> Just name
     _                              -> Nothing
 
-getNullability :: Text -> LinterState -> Maybe Nullability
-getNullability name st =
-    case Text.splitOn "->" name of
-        [var] -> fst <$> Map.lookup var (typeEnv st)
-        [base, member] -> do
-            (_, baseTypeNodeM) <- Map.lookup base (typeEnv st)
-            baseTypeNode <- baseTypeNodeM
-            baseType <- case baseTypeNode of
-                Fix (C.VarDecl ty _ _) -> Just ty
-                _                      -> Just baseTypeNode
-            structName <- getStructName baseType
-            structDef <- Map.lookup structName (structDefs st)
-            (memberNullability, _) <- Map.lookup member structDef
-            Just memberNullability
-        _ -> Nothing
+getDeclaredNullability :: AccessPath -> LinterState -> Nullability
+getDeclaredNullability path st = fromMaybe UnspecifiedNullability $ case path of
+    PathVar var -> fst <$> Map.lookup (Text.pack var) (typeEnv st)
+    PathField base member -> do
+        baseType <- getDeclaredType base st
+        case baseType of
+            Fix (C.VarDecl ty _ specs) | any isArraySpec specs ->
+                return $ getNullability' ty
+            baseType' -> do
+                structName <- getStructName baseType'
+                structDef <- Map.lookup structName (structDefs st)
+                fst <$> Map.lookup (Text.pack member) structDef
+    _ -> Nothing
 
-isExprNonNull :: Node (Lexeme Text) -> LinterM Bool
-isExprNonNull (Fix node) = case node of
-    C.UnaryExpr C.UopAddress _ -> return True
-    C.LiteralExpr C.String _   -> return True
-    C.CastExpr _ e             -> isExprNonNull e
-    C.ParenExpr e              -> isExprNonNull e
-    C.VarExpr (C.L _ _ name)   -> checkVar name
-    C.LiteralExpr C.ConstId (C.L _ _ name) -> checkVar name
-    C.FunctionCall funcExpr _  -> do
-        st <- State.get
-        case getFuncName funcExpr of
-            Just name -> case Map.lookup name (functionDefs st) of
-                Just (retNull, _) -> return $ retNull == NonNullVar
-                Nothing           -> return False
-            Nothing -> return False
-    _ -> do
-        st <- State.get
-        case exprToText (Fix node) of
-            Just name -> return $ Set.member name (nonNullSet st) || getNullability name st == Just NonNullVar
-            Nothing   -> return False
+getDeclaredType :: AccessPath -> LinterState -> Maybe (C.Node (Lexeme Text))
+getDeclaredType path st = case path of
+    PathVar name -> snd =<< Map.lookup (Text.pack name) (typeEnv st)
+    PathField base member -> do
+        baseType <- getDeclaredType base st
+        case baseType of
+            Fix (C.VarDecl ty _ specs) | any isArraySpec specs ->
+                Just ty
+            baseType' -> do
+                structName <- getStructName baseType'
+                structDef <- Map.lookup structName (structDefs st)
+                snd =<< Map.lookup (Text.pack member) structDef
+    _ -> Nothing
+
+isArraySpec :: C.Node (Lexeme Text) -> Bool
+isArraySpec (Fix (C.DeclSpecArray {})) = True
+isArraySpec _                          = False
+
+evaluate :: C.Node (Lexeme Text) -> S.SState -> S.SVal
+evaluate expr@(Fix node) st = case node of
+    C.LiteralExpr C.ConstId (C.L _ _ "NULL") -> S.SNull
+    C.LiteralExpr _ (C.L _ _ "nullptr")      -> S.SNull
+    C.LiteralExpr C.Int (C.L _ _ "0")        -> S.SNull
+    C.LiteralExpr C.String _                 -> S.SAddr (PathVar "<string>")
+    C.UnaryExpr C.UopAddress e               -> case exprToPath e of
+        Just p  -> S.SAddr p
+        Nothing -> S.STop
+    C.ParenExpr e                            -> evaluate e st
+    C.CastExpr _ e                           -> evaluate e st
+    C.TernaryExpr cond thenBranch elseBranch ->
+        let c = evaluate cond st
+            v1 = evaluate thenBranch st
+            v2 = evaluate elseBranch st
+        in if v1 == v2 then v1 else S.SIte c v1 v2
+    C.BinaryExpr lhs op rhs                  ->
+        let v1 = evaluate lhs st
+            v2 = evaluate rhs st
+        in S.SBinOp op v1 v2
+    C.UnaryExpr op e                         ->
+        let v = evaluate e st
+        in S.SUnaryOp op v
+    _ -> case exprToPath expr of
+        Just path -> fromMaybe (S.SVar path) (Map.lookup path (S.store st))
+        Nothing   -> S.STop
+
+nullabilityProblem :: LinterState -> Dataflow Node EdgeType S.SState
+nullabilityProblem lst = Dataflow
+    { transfer     = transferFunc
+    , edgeTransfer = edgeTransferFunc
+    , merge        = S.merge (isDeclNonNull lst) Nothing
+    , initial      = S.emptyState
+    }
   where
-    checkVar name = do
-        st <- State.get
-        let isArray = case Map.lookup name (typeEnv st) of
-                Just (_, Just (Fix (C.VarDecl _ _ specs))) -> any isArraySpec specs
-                _ -> False
-        return $ isArray || Set.member name (nonNullSet st) || getNullability name st == Just NonNullVar
+    transferFunc (Node _ nk) s = case nk of
+        StmtNode stmt -> transferStmt stmt s
+        _             -> s
 
-    isArraySpec (Fix (C.DeclSpecArray {})) = True
-    isArraySpec _                          = False
+    transferStmt (Fix node) s = case node of
+        C.ExprStmt e -> transferStmt e s
+        C.VarDeclStmt (Fix (C.VarDecl ty (C.L _ _ name) _)) (Just i) ->
+            let v = evaluate i s
+                path = PathVar (Text.unpack name)
+            in if isPointerType ty then S.assign path v s else s
+        C.VarDeclStmt (Fix (C.VarDecl _ (C.L _ _ name) _)) Nothing ->
+            let path = PathVar (Text.unpack name)
+            in S.assign path (S.SVar path) s
+        C.AssignExpr lhs AopEq rhs ->
+            let v = evaluate rhs s
+            in case exprToPath lhs of
+                Just path -> S.assign path v s
+                Nothing   -> s
+        C.FunctionCall funcExpr args ->
+            let s' = foldl (flip transferStmt) s (funcExpr : args)
+            in case getFuncName funcExpr of
+                Just "assert" -> case args of
+                    [arg] -> S.addConstraint (S.SBool (evaluate arg s')) s'
+                    _     -> s'
+                Just "LOGGER_ASSERT" -> case args of
+                    (_:arg:_) -> S.addConstraint (S.SBool (evaluate arg s')) s'
+                    _         -> s'
+                _ -> s'
+        _ -> foldl (flip transferStmt) s (unFix (Fix node))
 
-getFuncName :: Node (Lexeme Text) -> Maybe Text
-getFuncName (Fix (C.VarExpr (C.L _ _ name)))               = Just name
-getFuncName (Fix (C.LiteralExpr C.ConstId (C.L _ _ name))) = Just name
-getFuncName (Fix (C.ParenExpr e))                          = getFuncName e
-getFuncName _                                              = Nothing
+    edgeTransferFunc (Node _ (BranchNode cond)) branch s =
+        let v = evaluate cond s
+            constraint = case branch of
+                TrueBranch  -> S.SBool v
+                FalseBranch -> S.negateConstraint (S.SBool v)
+                _           -> S.SEquals S.STop S.STop -- No-op
+        in S.addConstraint constraint s
+    edgeTransferFunc _ _ s = s
 
-checkCondition :: Node (Lexeme Text) -> (Set Text, Set Text)
-checkCondition e = go e
+collectTypeEnv :: C.Node (Lexeme Text) -> TypeEnv
+collectTypeEnv = flip State.execState Map.empty . traverseAst actions
   where
-    go n@(Fix node) = case node of
-        C.BinaryExpr lhs BopNe (Fix (C.LiteralExpr C.ConstId (C.L _ _ "NULL"))) ->
-            (fromText $ exprToText lhs, Set.empty)
-        C.BinaryExpr (Fix (C.LiteralExpr C.ConstId (C.L _ _ "NULL"))) BopNe rhs ->
-            (fromText $ exprToText rhs, Set.empty)
-        C.BinaryExpr lhs BopEq (Fix (C.LiteralExpr C.ConstId (C.L _ _ "NULL"))) ->
-            (Set.empty, fromText $ exprToText lhs)
-        C.BinaryExpr (Fix (C.LiteralExpr C.ConstId (C.L _ _ "NULL"))) BopEq rhs ->
-            (Set.empty, fromText $ exprToText rhs)
-        C.BinaryExpr lhs BopNe (Fix (C.LiteralExpr _ (C.L _ _ "nullptr"))) ->
-            (fromText $ exprToText lhs, Set.empty)
-        C.BinaryExpr (Fix (C.LiteralExpr _ (C.L _ _ "nullptr"))) BopNe rhs ->
-            (fromText $ exprToText rhs, Set.empty)
-        C.BinaryExpr lhs BopEq (Fix (C.LiteralExpr _ (C.L _ _ "nullptr"))) ->
-            (Set.empty, fromText $ exprToText lhs)
-        C.BinaryExpr (Fix (C.LiteralExpr _ (C.L _ _ "nullptr"))) BopEq rhs ->
-            (Set.empty, fromText $ exprToText rhs)
+    actions = astActions
+        { doNode = \_ node act -> case unFix node of
+            C.VarDecl ty (C.L _ _ name) specs -> do
+                let nullability = if any isArraySpec specs then NonNullVar else getNullability' ty
+                State.modify $ Map.insert name (nullability, Just node)
+                act
+            _ -> act
+        }
 
-        C.UnaryExpr UopNot inner ->
-            let (thenSet, elseSet) = checkCondition inner
-            in (elseSet, thenSet)
+isDeclNonNull :: LinterState -> S.SVal -> Bool
+isDeclNonNull lst = \case
+    S.SVar path -> getDeclaredNullability path lst /= NullableVar
+    S.SAddr _   -> True
+    S.SBinOp op v1 _ | op `elem` [BopPlus, BopMinus] -> isDeclNonNull lst v1
+    _           -> False
 
-        C.BinaryExpr lhs BopAnd rhs ->
-            let (then1, else1) = checkCondition lhs
-                (then2, else2) = checkCondition rhs
-            in (then1 `Set.union` then2, else1 `Set.union` else2)
+analyseExpr :: S.SState -> C.Node (Lexeme Text) -> LinterM S.SState
+analyseExpr st expr@(Fix fixNode) = case fixNode of
+    C.TernaryExpr cond thenBranch elseBranch -> do
+        st' <- analyseExpr st cond
+        let v = evaluate cond st'
+        lst <- State.get
+        stThen <- analyseExpr (S.addConstraint (S.SBool v) st') thenBranch
+        stElse <- analyseExpr (S.addConstraint (S.negateConstraint (S.SBool v)) st') elseBranch
+        return $ S.merge (isDeclNonNull lst) (Just v) stThen stElse
 
-        C.BinaryExpr lhs BopOr rhs ->
-            let (then1, else1) = checkCondition lhs
-                (then2, else2) = checkCondition rhs
-            in (then1 `Set.union` then2, else1 `Set.union` else2)
+    C.BinaryExpr lhs BopAnd rhs -> do
+        st' <- analyseExpr st lhs
+        let v = evaluate lhs st'
+        analyseExpr (S.addConstraint (S.SBool v) st') rhs
 
-        C.ParenExpr inner -> checkCondition inner
+    C.BinaryExpr lhs BopOr rhs -> do
+        st' <- analyseExpr st lhs
+        let v = evaluate lhs st'
+        analyseExpr (S.addConstraint (S.negateConstraint (S.SBool v)) st') rhs
 
-        C.VarExpr {} -> (fromText $ exprToText n, Set.empty)
-        C.PointerAccess {} -> (fromText $ exprToText n, Set.empty)
-        C.MemberAccess {} -> (fromText $ exprToText n, Set.empty)
-        C.UnaryExpr C.UopDeref _ -> (fromText $ exprToText n, Set.empty)
-
-        _ -> (Set.empty, Set.empty)
-
-    fromText Nothing  = Set.empty
-    fromText (Just t) = Set.singleton t
-
-isTerminating :: Node (Lexeme Text) -> Bool
-isTerminating = \case
-    Fix (C.Return _)            -> True
-    Fix C.Break                 -> True
-    Fix C.Continue              -> True
-    Fix (C.Goto _)              -> True
-    Fix (C.FunctionCall expr _) ->
-        case getFuncName expr of
-            Just "abort"        -> True
-            Just "exit"         -> True
-            Just "LOGGER_FATAL" -> True
-            _                   -> False
-    Fix (C.ExprStmt e)          -> isTerminating e
-    Fix (C.IfStmt _ t (Just e)) -> isTerminating t && isTerminating e
-    Fix (C.CompoundStmt stmts)  -> any isTerminating stmts
-    _                           -> False
-
-analyseStmts :: [Node (Lexeme Text)] -> LinterM ()
-analyseStmts = mapM_ analyseExpr
-
-analyseExpr :: Node (Lexeme Text) -> LinterM ()
-analyseExpr (Fix fixNode) = case fixNode of
     C.CastExpr toType fromExpr -> do
-        st <- State.get
-        let fromNameM = exprToText fromExpr
-        forM_ fromNameM $ \fromName ->
-            forM_ (getNullability fromName st) $ \nullability ->
-                if isNonnull toType && nullability == NullableVar && not (Set.member fromName (nonNullSet st))
-                then State.lift . warnDoc (currentFile st) fromExpr $
-                        "expression" <+> backticks (pretty fromName)
-                        <+> "is nullable and has not been checked before this cast"
-                else return ()
-        traverse_ analyseExpr fixNode
+        st' <- analyseExpr st fromExpr
+        lst <- State.get
+        let v = evaluate fromExpr st'
+        when (isNonnull toType && S.canBeNull (isDeclNonNull lst) v st') $
+             State.lift . warnDoc (currentFile lst) fromExpr $
+                 "expression" <+> backticks (ppNode fromExpr)
+                 <+> "is nullable and has not been checked before this cast"
+        -- After a non-null cast, assume it's non-null in this branch
+        return $ if isNonnull toType then S.addConstraint (S.SNotEquals v S.SNull) st' else st'
 
-    C.AssignExpr lhs _ rhs -> do
-        analyseExpr lhs
-        analyseExpr rhs
-        let lhsNameM = exprToText lhs
-        rhsIsNonNull <- isExprNonNull rhs
-        forM_ lhsNameM $ \lhsName ->
-            if rhsIsNonNull
-                then State.modify $ \s -> s { nonNullSet = Set.insert lhsName (nonNullSet s) }
-                else State.modify $ \s -> s { nonNullSet = Set.delete lhsName (nonNullSet s) }
+    C.PointerAccess e _ -> do
+        st' <- analyseExpr st e
+        lst <- State.get
+        let v = evaluate e st'
+        when (S.canBeNull (isDeclNonNull lst) v st') $
+            State.lift . warnDoc (currentFile lst) e $
+                "pointer" <+> backticks (ppNode e)
+                <+> "is nullable and has not been checked before this access"
+        -- After access, it must have been non-null
+        return $ S.addConstraint (S.SNotEquals v S.SNull) st'
 
-    C.BinaryExpr lhs C.BopAnd rhs -> do
-        analyseExpr lhs
-        let (nonNullInThen, _) = checkCondition lhs
-        st <- State.get
-        State.put $ st { nonNullSet = nonNullSet st `Set.union` nonNullInThen }
-        analyseExpr rhs
-        State.put st
+    C.ArrayAccess e _ -> do
+        st' <- analyseExpr st e
+        lst <- State.get
+        let v = evaluate e st'
+        when (not (isDeclNonNull lst v) && S.canBeNull (isDeclNonNull lst) v st') $
+            State.lift . warnDoc (currentFile lst) e $
+                "pointer" <+> backticks (ppNode e)
+                <+> "is nullable and has not been checked before this access"
+        return $ S.addConstraint (S.SNotEquals v S.SNull) st'
 
-    C.IfStmt condition thenBranch elseBranchM -> do
-        analyseExpr condition
-        let (nonNullInThen, nonNullInElse) = checkCondition condition
-
-        initialState <- State.get
-
-        State.put $ initialState { nonNullSet = nonNullSet initialState `Set.union` nonNullInThen }
-        analyseStmts' thenBranch
-        let thenReturns = isTerminating thenBranch
-        stateAfterThen <- State.get
-
-        (stateAfterElse, elseReturns) <- case elseBranchM of
-            Nothing -> do
-                let s = initialState { nonNullSet = nonNullSet initialState `Set.union` nonNullInElse }
-                return (s, False)
-            Just elseBranch -> do
-                State.put $ initialState { nonNullSet = nonNullSet initialState `Set.union` nonNullInElse }
-                analyseStmts' elseBranch
-                s <- State.get
-                return (s, isTerminating elseBranch)
-
-        let finalSet = if thenReturns && not elseReturns
-                         then nonNullSet stateAfterElse
-                         else if not thenReturns && elseReturns
-                         then nonNullSet stateAfterThen
-                         else nonNullSet stateAfterThen `Set.intersection` nonNullSet stateAfterElse
-
-        State.put $ stateAfterThen { nonNullSet = finalSet }
-
-    C.TernaryExpr condition thenBranch elseBranch -> do
-        analyseExpr condition
-        let (nonNullInThen, nonNullInElse) = checkCondition condition
-
-        initialState <- State.get
-
-        State.put $ initialState { nonNullSet = nonNullSet initialState `Set.union` nonNullInThen }
-        analyseExpr thenBranch
-        stateAfterThen <- State.get
-
-        State.put $ initialState { nonNullSet = nonNullSet initialState `Set.union` nonNullInElse }
-        analyseExpr elseBranch
-        stateAfterElse <- State.get
-
-        State.put $ stateAfterThen { nonNullSet = nonNullSet stateAfterThen `Set.intersection` nonNullSet stateAfterElse }
-
-    C.VarDeclStmt decl@(Fix (C.VarDecl ty (C.L _ _ name) _)) initM -> do
-        let nullability = if isNullable ty then NullableVar else NonNullVar
-        State.modify $ \s -> s { typeEnv = Map.insert name (nullability, Just decl) (typeEnv s) }
-        forM_ initM $ \i -> do
-            analyseExpr i
-            isInitNonNull <- isExprNonNull i
-            if isInitNonNull
-                then State.modify $ \s -> s { nonNullSet = Set.insert name (nonNullSet s) }
-                else return ()
+    C.UnaryExpr C.UopDeref e -> do
+        st' <- analyseExpr st e
+        lst <- State.get
+        let v = evaluate e st'
+        when (S.canBeNull (isDeclNonNull lst) v st') $
+            State.lift . warnDoc (currentFile lst) e $
+                "pointer" <+> backticks (ppNode e)
+                <+> "is nullable and has not been checked before this dereference"
+        return $ S.addConstraint (S.SNotEquals v S.SNull) st'
 
     C.FunctionCall funcExpr args -> do
-        analyseExpr funcExpr
-        mapM_ analyseExpr args
-        st <- State.get
-        case getFuncName funcExpr of
-            Just "assert" -> case args of
-                [arg] -> do
-                    let (nonNullInThen, _) = checkCondition arg
-                    State.modify $ \s -> s { nonNullSet = nonNullSet s `Set.union` nonNullInThen }
-                _ -> return ()
-            Just "LOGGER_ASSERT" -> case args of
-                (_:arg:_) -> do
-                    let (nonNullInThen, _) = checkCondition arg
-                    State.modify $ \s -> s { nonNullSet = nonNullSet s `Set.union` nonNullInThen }
-                _ -> return ()
-            Just name ->
-                case Map.lookup name (functionDefs st) of
-                    Just (_, paramNullabilities) ->
-                        forM_ (zip args paramNullabilities) $ \(arg, paramNullability) ->
-                            when (paramNullability == NonNullVar) $
-                                case exprToText arg of
-                                    Just argName -> do
-                                        let nullability = getNullability argName st
-                                        when (nullability == Just NullableVar && not (Set.member argName (nonNullSet st))) $
-                                            State.lift . warnDoc (currentFile st) arg $
-                                                "expression" <+> backticks (pretty argName)
-                                                <+> "is nullable and has not been checked before this call"
-                                    Nothing -> return ()
-                    Nothing -> return ()
+        st' <- foldM analyseExpr st (funcExpr : args)
+        lst <- State.get
+        let mFuncInfo = case getFuncName funcExpr of
+                Just name -> Map.lookup name (functionDefs lst)
+                Nothing   -> Nothing
+
+        let mFuncInfo' = case mFuncInfo of
+                Just info -> Just info
+                Nothing -> case exprToPath funcExpr of
+                    Just path -> case getDeclaredType path lst of
+                        Just (Fix (C.VarDecl ty _ _)) ->
+                            let getTypeName t = case unFix t of
+                                    C.TyUserDefined name -> Just (C.lexemeText name)
+                                    C.TyFunc name -> Just (C.lexemeText name)
+                                    C.TyPointer t' -> getTypeName t'
+                                    C.TyConst t' -> getTypeName t'
+                                    _ -> Nothing
+                            in case getTypeName ty of
+                                Just name -> Map.lookup name (functionDefs lst)
+                                Nothing   -> Nothing
+                        _ -> Nothing
+                    Nothing -> Nothing
+
+        case mFuncInfo' of
+            Just (_, paramNullabilities) ->
+                forM_ (zip args paramNullabilities) $ \(arg, paramNullability) ->
+                    let v = evaluate arg st'
+                        -- Don't warn again if it's a non-null cast (CastExpr already warned)
+                        isCastToNonnull = case unFix arg of
+                            C.CastExpr ty _ -> isNonnull ty
+                            _               -> False
+                    in when (paramNullability == NonNullVar && not isCastToNonnull && S.canBeNull (isDeclNonNull lst) v st') $
+                        State.lift . warnDoc (currentFile lst) arg $
+                            "expression" <+> backticks (ppNode arg)
+                            <+> "is nullable and has not been checked before this call"
             Nothing -> return ()
 
-    _ -> traverse_ analyseExpr fixNode
+        let st'' = case getFuncName funcExpr of
+                Just "assert" -> case args of
+                    [arg] -> S.addConstraint (S.SBool (evaluate arg st')) st'
+                    _     -> st'
+                Just "LOGGER_ASSERT" -> case args of
+                    (_:arg:_) -> S.addConstraint (S.SBool (evaluate arg st')) st'
+                    _         -> st'
+                _ -> st'
+        return st''
 
-analyseStmts' :: Node (Lexeme Text) -> LinterM ()
-analyseStmts' (Fix (C.CompoundStmt stmts)) = analyseStmts stmts
-analyseStmts' node                         = analyseExpr node
+    C.AssignExpr lhs op rhs -> do
+        st' <- analyseExpr st lhs
+        st'' <- analyseExpr st' rhs
+        lst <- State.get
+        case (op, exprToPath lhs) of
+            (AopEq, Just lhsPath) -> do
+                let lhsNullability = getDeclaredNullability lhsPath lst
+                    v = evaluate rhs st''
+                when (lhsNullability == NonNullVar && S.canBeNull (isDeclNonNull lst) v st'') $
+                    State.lift . warnDoc (currentFile lst) rhs $
+                        "expression" <+> backticks (ppNode rhs)
+                        <+> "is nullable and has not been checked before this assignment"
+                return $ S.assign lhsPath v st''
+            _ -> return st''
+
+    C.BinaryExpr lhs op rhs | op `elem` [BopPlus, BopMinus] -> do
+        st' <- analyseExpr st lhs
+        st'' <- analyseExpr st' rhs
+        lst <- State.get
+        let check e s = case (exprToPath e, exprToPath e >>= (`getDeclaredType` lst)) of
+                (Just _, Just ty) | isPointerType ty ->
+                    let v = evaluate e s
+                    in when (S.canBeNull (isDeclNonNull lst) v s) $
+                        State.lift . warnDoc (currentFile lst) e $
+                            "pointer" <+> backticks (ppNode e)
+                            <+> "is nullable and has not been checked before this arithmetic"
+                _ -> return ()
+        check lhs st''
+        check rhs st''
+        return st''
+
+    _ -> foldM analyseExpr st (unFix expr)
 
 data ProgramDefs = ProgramDefs
     { programStructs   :: Map Text TypeEnv
-    , programFunctions :: Map Text (Nullability, [Nullability], FilePath, Node (Lexeme Text))
+    , programFunctions :: Map Text (Nullability, [Nullability], FilePath, C.Node (Lexeme Text))
+    , programGlobals   :: TypeEnv
+    , programTypedefs  :: Map Text (Nullability, [Nullability])
     }
 
 mergeNullability :: Nullability -> Nullability -> Maybe Nullability
@@ -372,6 +423,15 @@ collectDefs = astActions
                 let fieldEnv = Map.fromList . concatMap getFieldDecls $ members
                 State.modify $ \(s, errs) -> (s { programStructs = Map.insert (C.lexemeText structName) fieldEnv (programStructs s) }, errs)
                 act
+            C.TypedefFunction proto -> do
+                case functionName proto of
+                    Just name -> do
+                        let (Fix (C.FunctionPrototype retType _ params)) = proto
+                        let retNullability = getNullability' retType
+                        let paramNullabilities = map getParamNullability params
+                        State.modify $ \(s, errs) -> (s { programTypedefs = Map.insert name (retNullability, paramNullabilities) (programTypedefs s) }, errs)
+                    Nothing -> return ()
+                act
             C.FunctionPrototype retType (C.L _ _ name) params -> do
                 let retNullability = getNullability' retType
                 let paramNullabilities = map getParamNullability params
@@ -388,6 +448,12 @@ collectDefs = astActions
                                         warnDoc file node $ "nullability mismatch for function" <+> backticks (pretty name) <> ", conflicts with declaration at" <+> pretty oldFile
                                 State.put (s, errs')
                                 act
+            C.ConstDecl ty (C.L _ _ name) -> do
+                State.modify $ \(s, errs) -> (s { programGlobals = Map.insert name (getNullability' ty, Just ty) (programGlobals s) }, errs)
+                act
+            C.ConstDefn _ ty (C.L _ _ name) _ -> do
+                State.modify $ \(s, errs) -> (s { programGlobals = Map.insert name (getNullability' ty, Just ty) (programGlobals s) }, errs)
+                act
             _ -> act
     }
   where
@@ -395,36 +461,97 @@ collectDefs = astActions
         [(C.lexemeText name, (getNullability' ty, Just ty))]
     getFieldDecls _ = []
 
-    getParamNullability (Fix (C.VarDecl ty _ _)) = getNullability' ty
-    getParamNullability _                        = NonNullVar
+    getParamNullability (Fix (C.VarDecl ty _ specs))
+        | any isArraySpec specs = NonNullVar
+        | any isNullable specs || isNullable ty = NullableVar
+        | any isNonnull specs || isNonnull ty = NonNullVar
+        | otherwise = UnspecifiedNullability
+    getParamNullability _ = NonNullVar
+
+runAnalysis :: C.Node (Lexeme Text) -> LinterM ()
+runAnalysis defn@(Fix (C.FunctionDefn _ proto body)) = do
+    st <- State.get
+    let localDecls = collectTypeEnv defn
+    -- Preserve merged param info from declarations; localDecls from the definition
+    -- might have fewer annotations. Map.union is left-biased, so we want (typeEnv st) first.
+    let tenv = Map.union (typeEnv st) localDecls
+    let st' = st { typeEnv = tenv }
+    let (entry, cfg) = fromFunction defn
+    let problem = nullabilityProblem st'
+    let results = solve entry cfg problem
+
+    forM_ (Map.toList results) $ \(node, s) ->
+        case node of
+            Node _ (StmtNode stmt)   -> State.withStateT (\_ -> st') $ void $ analyseAtomicStmt s stmt
+            Node _ (BranchNode cond) -> State.withStateT (\_ -> st') $ void $ analyseExpr s cond
+            _ -> return ()
+runAnalysis _ = return ()
+
+analyseAtomicStmt :: S.SState -> C.Node (Lexeme Text) -> LinterM S.SState
+analyseAtomicStmt s (Fix node) = case node of
+    C.ExprStmt e -> analyseExpr s e
+    C.VarDeclStmt (Fix (C.VarDecl ty (C.L _ _ name) _)) (Just i) -> do
+        s' <- analyseExpr s i
+        lst <- State.get
+        let v = evaluate i s'
+            path = PathVar (Text.unpack name)
+        when (getNullability' ty == NonNullVar && S.canBeNull (isDeclNonNull lst) v s') $
+            State.lift . warnDoc (currentFile lst) i $
+                "expression" <+> backticks (ppNode i)
+                <+> "is nullable and has not been checked before this assignment"
+        return $ if isPointerType ty then S.assign path v s' else s'
+    C.Return (Just e) -> do
+        s' <- analyseExpr s e
+        lst <- State.get
+        let v = evaluate e s'
+        when (currentFuncRet lst == NonNullVar && S.canBeNull (isDeclNonNull lst) v s') $
+            State.lift . warnDoc (currentFile lst) e $
+                "expression" <+> backticks (ppNode e)
+                <+> "is nullable and has not been checked before this return"
+        return s'
+    C.IfStmt cond _ _ -> analyseExpr s cond
+    C.WhileStmt cond _ -> analyseExpr s cond
+    C.DoWhileStmt _ cond -> analyseExpr s cond
+    C.ForStmt init' cond step _ -> do
+        s' <- analyseExpr s init'
+        s'' <- analyseExpr s' cond
+        analyseExpr s'' step
+    C.SwitchStmt expr _ -> analyseExpr s expr
+    C.Case expr _ -> analyseExpr s expr
+    C.Label _ _ -> return s -- Body analyzed as its own node
+    C.PreprocIf cond _ _ -> analyseExpr s cond
+    C.PreprocIfdef _ _ _ -> return s -- Identifier is atomic
+    C.PreprocIfndef _ _ _ -> return s -- Identifier is atomic
+    C.PreprocElif cond _ _ -> analyseExpr s cond
+    _ -> return s -- Other nodes don't contain expressions to check
 
 linter :: ProgramDefs -> AstActions (State [Diagnostic CimplePos]) Text
 linter pdefs = astActions
     { doNode = \file node act ->
         case unFix node of
-            C.FunctionDefn _ proto@(Fix (C.FunctionPrototype _ (C.L _ _ name) _)) body ->
+            C.FunctionDefn _ proto@(Fix (C.FunctionPrototype retType (C.L _ _ name) _)) _ ->
                 let localParams = getParamTypes proto
-                    mergedParamsInfo = case Map.lookup name (programFunctions pdefs) of
-                        Just (_, mergedParams, _, _) | length mergedParams == length localParams ->
-                            zipWith (\(n, (_, ty)) m -> (n, (m, ty))) localParams mergedParams
-                        _ -> localParams
-                    tenv = Map.fromList mergedParamsInfo
-                    initialNonNulls = Map.keysSet . Map.filter (\(m, _) -> m == NonNullVar || m == UnspecifiedNullability) $ tenv
-                    initialState = LinterState tenv (programStructs pdefs) (Map.map (\(r, p, _, _) -> (r, p)) (programFunctions pdefs)) initialNonNulls file
-                in State.evalStateT (analyseStmts' body) initialState
+                    (retNull, mergedParamsInfo) = case Map.lookup name (programFunctions pdefs) of
+                        Just (r, mergedParams, _, _) | length mergedParams == length localParams ->
+                            (r, zipWith (\(n, (_, ty)) m -> (n, (m, ty))) localParams mergedParams)
+                        _ -> (getNullability' retType, localParams)
+                    tenv = Map.union (Map.fromList mergedParamsInfo) (programGlobals pdefs)
+                    fDefs = Map.union (Map.map (\(r, p, _, _) -> (r, p)) (programFunctions pdefs)) (programTypedefs pdefs)
+                    initialState = LinterState tenv (programStructs pdefs) fDefs file retNull
+                in State.evalStateT (runAnalysis node) initialState
             _ -> act
     }
 
-analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
+analyse :: [(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse input =
-    let initialPdefs = ProgramDefs Map.empty Map.empty
+    let initialPdefs = ProgramDefs Map.empty Map.empty Map.empty Map.empty
         (pdefs, globalErrs) = State.execState (traverseAst collectDefs input) (initialPdefs, [])
     in reverse . flip State.execState globalErrs . traverseAst (linter pdefs) $ input
 
-descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
+descr :: ([(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("nullability", Text.unlines
-    [ "Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer without a null check."
+    [ "Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer or dereferenced without a null check."
     , ""
-    , "**Reason:** Casting a nullable pointer to a non-null pointer without ensuring it's not"
+    , "**Reason:** Casting a nullable pointer to a non-null pointer or dereferencing it without ensuring it's not"
     , "null can lead to null pointer dereferences and crashes."
     ]))

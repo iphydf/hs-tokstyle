@@ -21,10 +21,13 @@ library
     Tokstyle.C.Env
     Tokstyle.C.Linter
     Tokstyle.C.ObjectSystem
-    Tokstyle.C.Analysis.AccessPath
+    Tokstyle.Analysis.AccessPath
+    Tokstyle.Analysis.Dataflow
+    Tokstyle.Analysis.Symbolic
     Tokstyle.C.Analysis.CFG
-    Tokstyle.C.Analysis.Dataflow
     Tokstyle.C.Analysis.Liveness
+    Tokstyle.Cimple.Analysis.CFG
+    Tokstyle.Cimple.Analysis.Liveness
     Tokstyle.C.Linter.BoolConversion
     Tokstyle.C.Linter.BorrowCheck
     Tokstyle.C.Linter.CallbackData
@@ -92,7 +95,7 @@ library
     , array           <0.6
     , base            >=4       && <5
     , bytestring      <0.13
-    , cimple          >=0.0.30
+    , cimple          >=0.0.31
     , casing          <0.2
     , containers      <0.8
     , data-fix        <0.4
@@ -170,7 +173,10 @@ test-suite testsuite
   main-is:            testsuite.hs
   other-modules:
     Tokstyle.C.Analysis.CFGSpec
-    Tokstyle.C.Analysis.DataflowSpec
+    Tokstyle.Analysis.DataflowSpec
+    Tokstyle.Analysis.SymbolicSpec
+    Tokstyle.Cimple.Analysis.CFGSpec
+    Tokstyle.Cimple.Analysis.LivenessSpec
     Tokstyle.C.Linter.BoolConversionSpec
     Tokstyle.C.Linter.BorrowCheckSpec
     Tokstyle.C.Linter.CallbackDataSpec
@@ -238,5 +244,6 @@ test-suite testsuite
     , mtl
     , prettyprinter
     , prettyprinter-ansi-terminal
+    , QuickCheck
     , text
     , tokstyle

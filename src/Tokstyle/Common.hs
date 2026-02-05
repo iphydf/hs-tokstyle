@@ -45,12 +45,12 @@ isPointer x = case unFix x of
 --
 -- Non-function nodes result in 'Nothing'.
 functionName :: Show a => Node (Lexeme a) -> Maybe a
-functionName (Fix (FunctionPrototype _ (L _ IdVar name) _)) = Just name
-functionName (Fix (FunctionDecl _ proto  )) = functionName proto
-functionName (Fix (FunctionDefn _ proto _)) = functionName proto
-functionName (Fix (AttrPrintf _ _ entity))  = functionName entity
-functionName (Fix (NonNull _ _ entity))     = functionName entity
-functionName _                              = Nothing
+functionName (Fix (FunctionPrototype _ (L _ _ name) _)) = Just name
+functionName (Fix (FunctionDecl _ proto  ))             = functionName proto
+functionName (Fix (FunctionDefn _ proto _))             = functionName proto
+functionName (Fix (AttrPrintf _ _ entity))              = functionName entity
+functionName (Fix (NonNull _ _ entity))                 = functionName entity
+functionName _                                          = Nothing
 
 
 -- Semantic equality: nodes are the same, except for source locations.

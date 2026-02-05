@@ -15,6 +15,7 @@ module Tokstyle.LinterSpec
     , spec
     ) where
 
+import           GHC.Stack                   (HasCallStack)
 import           Test.Hspec                  (Expectation, Spec,
                                               expectationFailure, it, shouldBe)
 
@@ -37,7 +38,7 @@ renderPlain :: Map FilePath [Text] -> [Diagnostic CimplePos] -> [Text]
 renderPlain cache = map (Text.stripEnd . TL.toStrict . PP.Text.renderLazy . layoutSmart defaultLayoutOptions . unAnnotate) . renderPure cache
 
 
-shouldProduce :: [Text] -> [Text] -> Expectation
+shouldProduce :: HasCallStack => [Text] -> [Text] -> Expectation
 shouldProduce actual expected =
     if actual == expected
     then return ()
@@ -74,20 +75,20 @@ testC :: [Text] -> [(FilePath, [Text])]
 testC code = [("test.c", code)]
 
 
-shouldWarn :: [Text] -> [(FilePath, [Text])] -> [[Text]] -> IO ()
+shouldWarn :: HasCallStack => [Text] -> [(FilePath, [Text])] -> [[Text]] -> IO ()
 shouldWarn activeWarnings inputs expected =
     check activeWarnings inputs `shouldProduce` map (intercalate "\n") expected
 
 
-shouldAccept :: [Text] -> [(FilePath, [Text])] -> IO ()
+shouldAccept :: HasCallStack => [Text] -> [(FilePath, [Text])] -> IO ()
 shouldAccept activeWarnings inputs = shouldWarn activeWarnings inputs []
 
 
-shouldWarnLocal :: [Text] -> [Text] -> [[Text]] -> IO ()
+shouldWarnLocal :: HasCallStack => [Text] -> [Text] -> [[Text]] -> IO ()
 shouldWarnLocal activeWarnings code = shouldWarn activeWarnings (testC code)
 
 
-shouldAcceptLocal :: [Text] -> [Text] -> IO ()
+shouldAcceptLocal :: HasCallStack => [Text] -> [Text] -> IO ()
 shouldAcceptLocal activeWarnings code = shouldWarnLocal activeWarnings code []
 
 

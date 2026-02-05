@@ -26,9 +26,9 @@ import           Language.C.Syntax.AST
 import           Prettyprinter                   (Pretty, pretty)
 import qualified Prettyprinter                   as PP
 import           Prettyprinter.Render.Terminal   (AnsiStyle)
-import           Tokstyle.C.Analysis.AccessPath
+import           Tokstyle.Analysis.AccessPath
+import           Tokstyle.Analysis.Dataflow      as Dataflow
 import           Tokstyle.C.Analysis.CFG         as CFG
-import           Tokstyle.C.Analysis.Dataflow    as Dataflow
 import           Tokstyle.C.Analysis.Liveness    (Liveness, liveness)
 import           Tokstyle.C.Env                  (DiagnosticLevel (..),
                                                   DiagnosticSpan (..), Env,

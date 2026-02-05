@@ -1,12 +1,12 @@
-module Tokstyle.C.Analysis.DataflowSpec (spec) where
-import           Data.Text                    (unlines)
-import           Prelude                      hiding (unlines)
+module Tokstyle.Analysis.DataflowSpec (spec) where
+import           Data.Text                  (unlines)
+import           Prelude                    hiding (unlines)
 
 import           Test.Hspec
 
-import           Data.Map.Strict              (Map)
-import qualified Data.Map.Strict              as Map
-import           Tokstyle.C.Analysis.Dataflow
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as Map
+import           Tokstyle.Analysis.Dataflow
 
 spec :: Spec
 spec = describe "Dataflow Solver" $ do

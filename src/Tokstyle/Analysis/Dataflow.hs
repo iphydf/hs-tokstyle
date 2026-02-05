@@ -1,4 +1,4 @@
-module Tokstyle.C.Analysis.Dataflow
+module Tokstyle.Analysis.Dataflow
     ( Dataflow (..)
     , solve
     , solveBackward

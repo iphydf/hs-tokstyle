@@ -4,15 +4,15 @@ module Tokstyle.C.Analysis.Liveness
     , Liveness
     ) where
 
-import           Data.Map.Strict                (Map)
-import qualified Data.Map.Strict                as Map
-import           Data.Set                       (Set)
-import qualified Data.Set                       as Set
-import           Language.C.Data.Ident          (Ident (..))
+import           Data.Map.Strict              (Map)
+import qualified Data.Map.Strict              as Map
+import           Data.Set                     (Set)
+import qualified Data.Set                     as Set
+import           Language.C.Data.Ident        (Ident (..))
 import           Language.C.Syntax.AST
-import           Tokstyle.C.Analysis.AccessPath
+import           Tokstyle.Analysis.AccessPath
+import           Tokstyle.Analysis.Dataflow
 import           Tokstyle.C.Analysis.CFG
-import           Tokstyle.C.Analysis.Dataflow
 
 type Liveness = Set AccessPath
 

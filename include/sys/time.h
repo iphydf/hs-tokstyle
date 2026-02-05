@@ -4,6 +4,7 @@
 
 typedef enum {
   CLOCK_MONOTONIC = 0,
+  CLOCK_REALTIME = 1,
 } clockid_t;
 
 typedef long suseconds_t;

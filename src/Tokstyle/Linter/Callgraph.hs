@@ -478,7 +478,9 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "WSAStringToAddress"
         , "WSAStringToAddressA"
 
+        , "CALENDAR_CLOCK"
         , "CLOCK_MONOTONIC"
+        , "CLOCK_REALTIME"
         , "clock_get_time"
         , "clock_gettime"
         , nktype "timespec"
@@ -586,6 +588,7 @@ analyse = reverse . flip State.execState [] . linter . (builtins <>) . callgraph
         , "FormatMessageA"
         , "GetAdaptersInfo"
         , "GetProcessHeap"
+        , "GetSystemTimeAsFileTime"
         , "GetTickCount"
         , "HeapAlloc"
         , "HeapFree"

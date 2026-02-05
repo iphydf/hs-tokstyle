@@ -327,9 +327,9 @@ Warns if a function has more than 7 nesting levels.
 
 ## `-Wnullability` (global)
 
-Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer without a null check.
+Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer or dereferenced without a null check.
 
-**Reason:** Casting a nullable pointer to a non-null pointer without ensuring it's not
+**Reason:** Casting a nullable pointer to a non-null pointer or dereferencing it without ensuring it's not
 null can lead to null pointer dereferences and crashes.
 
 ## `-Wownership-decls` (global)

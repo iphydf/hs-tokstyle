@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Tokstyle.C.Analysis.AccessPath
+module Tokstyle.Analysis.AccessPath
     ( AccessPath (..)
     , isPathPrefixOf
     ) where
