@@ -27,7 +27,7 @@ import           Language.Cimple              (AssignOp (..), BinaryOp (..),
                                                UnaryOp (..))
 import qualified Language.Cimple              as C
 import           Language.Cimple.Diagnostics  (CimplePos, Diagnostic)
-import           Language.Cimple.Pretty       (ppNode)
+import           Language.Cimple.Pretty       (ppNode, showNodePlain)
 import           Language.Cimple.TraverseAst  (AstActions, astActions, doNode,
                                                traverseAst)
 import           Prettyprinter                (pretty, (<+>))
@@ -99,7 +99,7 @@ exprToPath (Fix node) = case node of
     C.VarExpr (C.L _ _ name) -> Just $ PathVar (Text.unpack name)
     C.PointerAccess e (C.L _ _ member) -> PathField <$> exprToPath e <*> pure (Text.unpack member)
     C.MemberAccess e (C.L _ _ member) -> PathField <$> exprToPath e <*> pure (Text.unpack member)
-    C.ArrayAccess e (Fix (C.LiteralExpr C.Int (C.L _ _ idx))) -> PathField <$> exprToPath e <*> pure (Text.unpack idx)
+    C.ArrayAccess e idx -> PathIndex <$> exprToPath e <*> pure (Text.unpack $ showNodePlain idx)
     C.UnaryExpr C.UopDeref e -> PathDeref <$> exprToPath e
     C.ParenExpr e -> exprToPath e
     _ -> Nothing
@@ -141,6 +141,11 @@ getDeclaredNullability path st = fromMaybe UnspecifiedNullability $ case path of
                 structName <- getStructName baseType'
                 structDef <- Map.lookup structName (structDefs st)
                 fst <$> Map.lookup (Text.pack member) structDef
+    PathIndex base _ -> do
+        baseType <- getDeclaredType base st
+        case baseType of
+            Fix (C.VarDecl ty _ _) -> return $ getNullability' ty
+            _                      -> Nothing
     _ -> Nothing
 
 getDeclaredType :: AccessPath -> LinterState -> Maybe (C.Node (Lexeme Text))
@@ -155,6 +160,11 @@ getDeclaredType path st = case path of
                 structName <- getStructName baseType'
                 structDef <- Map.lookup structName (structDefs st)
                 snd =<< Map.lookup (Text.pack member) structDef
+    PathIndex base _ -> do
+        baseType <- getDeclaredType base st
+        case baseType of
+            Fix (C.VarDecl ty _ _) -> Just ty
+            _                      -> Nothing
     _ -> Nothing
 
 isArraySpec :: C.Node (Lexeme Text) -> Bool

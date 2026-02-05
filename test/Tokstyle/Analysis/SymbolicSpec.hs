@@ -20,6 +20,7 @@ instance Arbitrary AccessPath where
             [ PathVar <$> elements ["p", "q", "r", "s", "t"]
             , PathDeref <$> arbPath (n `div` 2)
             , PathField <$> arbPath (n `div` 2) <*> elements ["x", "y", "z"]
+            , PathIndex <$> arbPath (n `div` 2) <*> elements ["i", "j", "0", "1"]
             ]
 
     shrink (PathVar _)     = []
@@ -27,6 +28,7 @@ instance Arbitrary AccessPath where
     shrink PathReturn      = []
     shrink (PathDeref p)   = p : [PathDeref p' | p' <- shrink p]
     shrink (PathField p f) = p : [PathField p' f | p' <- shrink p]
+    shrink (PathIndex p i) = p : [PathIndex p' i | p' <- shrink p]
 
 instance Arbitrary SVal where
     arbitrary = sized arbSVal

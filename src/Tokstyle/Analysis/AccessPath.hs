@@ -15,6 +15,7 @@ data AccessPath
     | PathReturn
     | PathDeref AccessPath
     | PathField AccessPath String
+    | PathIndex AccessPath String
     deriving (Show, Eq, Ord)
 
 instance Pretty AccessPath where
@@ -24,6 +25,7 @@ instance Pretty AccessPath where
         PathReturn    -> "<return value>"
         PathDeref p   -> "*" <> pretty p
         PathField p s -> pretty p <> "->" <> pretty s
+        PathIndex p i -> pretty p <> "[" <> pretty i <> "]"
 
 -- | Check if the first path is a prefix of (or equal to) the second.
 -- e.g. "p" is a prefix of "p->f".
@@ -31,6 +33,7 @@ isPathPrefixOf :: AccessPath -> AccessPath -> Bool
 isPathPrefixOf p1 p2               | p1 == p2 = True
 isPathPrefixOf p1 (PathDeref p2)   = p1 `isPathPrefixOf` p2
 isPathPrefixOf p1 (PathField p2 _) = p1 `isPathPrefixOf` p2
+isPathPrefixOf p1 (PathIndex p2 _) = p1 `isPathPrefixOf` p2
 isPathPrefixOf PathReturn _        = False
 isPathPrefixOf _ _                 = False
 
@@ -41,3 +44,4 @@ pathDepth = \case
     PathReturn    -> 1
     PathDeref p   -> 1 + pathDepth p
     PathField p _ -> 1 + pathDepth p
+    PathIndex p _ -> 1 + pathDepth p

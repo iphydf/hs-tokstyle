@@ -251,6 +251,7 @@ summariseFunction = \case
     mapToParam _ PathReturn = PathReturn
     mapToParam params (PathDeref p) = PathDeref (mapToParam params p)
     mapToParam params (PathField p f) = PathField (mapToParam params p) f
+    mapToParam params (PathIndex p i) = PathIndex (mapToParam params p) i
 
     isParam v (ParamDecl (VarDecl (VarName (idName -> name) _) _ _) _) = name == v
     isParam _ _                                                       = False

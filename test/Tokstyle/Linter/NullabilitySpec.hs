@@ -314,6 +314,25 @@ spec = do
                        ]
             shouldAccept' code
 
+        it "tracks nullability for array access with variable index" $ do
+            let code = [ "void my_func(int **arr, int i) {"
+                       , "  if (arr[i] != nullptr) {"
+                       , "    *arr[i] = 1;"
+                       , "  }"
+                       , "}"
+                       ]
+            shouldAccept' code
+
+        it "tracks assignments to array access with variable index" $ do
+            let code = [ "void my_func(int *_Nullable *_Nonnull arr, int i) {"
+                       , "  int *p = (int *)malloc(sizeof(int));"
+                       , "  if (p == nullptr) return;"
+                       , "  arr[i] = p;"
+                       , "  *arr[i] = 1;"
+                       , "}"
+                       ]
+            shouldAccept' code
+
     describe "dereferences" $ do
         it "warns when a nullable pointer is dereferenced without check" $ do
             let code = [ "void my_func(int *_Nullable p) {"
