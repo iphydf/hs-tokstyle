@@ -291,6 +291,29 @@ spec = do
                        ]
             shouldAccept' code
 
+        it "terminates on msi_kill-like structure" $ do
+            let code = [ "typedef struct MSICall { struct MSICall *next; struct MSISession *s; int f; } MSICall;"
+                       , "typedef struct MSISession { MSICall **calls; int head; } MSISession;"
+                       , "void kill_call(MSICall *call) {"
+                       , "  if (call == 0) { return; }"
+                       , "  MSISession *s = call->s;"
+                       , "  MSICall *next = call->next;"
+                       , "  if (next != 0) { s->head = next->f; }"
+                       , "}"
+                       , "void msi_kill(MSISession *session) {"
+                       , "  if (session == 0) { return; }"
+                       , "  if (session->calls != 0) {"
+                       , "    MSICall *it = session->calls[0];"
+                       , "    while (it != 0) {"
+                       , "      MSICall *tmp = it;"
+                       , "      it = it->next;"
+                       , "      kill_call(tmp);"
+                       , "    }"
+                       , "  }"
+                       , "}"
+                       ]
+            shouldAccept' code
+
     describe "dereferences" $ do
         it "warns when a nullable pointer is dereferenced without check" $ do
             let code = [ "void my_func(int *_Nullable p) {"
@@ -545,6 +568,19 @@ spec = do
                        , "void my_func(int *_Nullable q) {"
                        , "   int *p = q;"
                        , "   if (p != nullptr) { my_other_func((int *_Nonnull)p); }"
+                       , "}"
+                       ]
+            shouldAccept' code
+
+        it "terminates on a loop that would otherwise cause infinite symbolic growth" $ do
+            let code = [ "void my_func(int cond, int *a, int *b) {"
+                       , "   int *p = nullptr;"
+                       , "   if (cond) {"
+                       , "     while (1) {"
+                       , "       if (cond) { p = a; } else { p = b; }"
+                       , "       int x = *p;"
+                       , "     }"
+                       , "   }"
                        , "}"
                        ]
             shouldAccept' code

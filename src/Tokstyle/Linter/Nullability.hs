@@ -34,6 +34,9 @@ import           Prettyprinter                (pretty, (<+>))
 import           Tokstyle.Analysis.AccessPath
 import           Tokstyle.Analysis.Dataflow   (Dataflow (..), solve)
 import qualified Tokstyle.Analysis.Symbolic   as S
+import           Tokstyle.Analysis.Symbolic   (lookupStore, sAddr, sBinOp, sIte,
+                                               sUnaryOp, sVar)
+
 import           Tokstyle.Cimple.Analysis.CFG (CFG, EdgeType (..), Node (..),
                                                NodeKind (..), fromFunction,
                                                getFuncName)
@@ -163,9 +166,9 @@ evaluate expr@(Fix node) st = case node of
     C.LiteralExpr C.ConstId (C.L _ _ "NULL") -> S.SNull
     C.LiteralExpr _ (C.L _ _ "nullptr")      -> S.SNull
     C.LiteralExpr C.Int (C.L _ _ "0")        -> S.SNull
-    C.LiteralExpr C.String _                 -> S.SAddr (PathVar "<string>")
+    C.LiteralExpr C.String _                 -> sAddr (PathVar "<string>")
     C.UnaryExpr C.UopAddress e               -> case exprToPath e of
-        Just p  -> S.SAddr p
+        Just p  -> sAddr p
         Nothing -> S.STop
     C.ParenExpr e                            -> evaluate e st
     C.CastExpr _ e                           -> evaluate e st
@@ -173,16 +176,16 @@ evaluate expr@(Fix node) st = case node of
         let c = evaluate cond st
             v1 = evaluate thenBranch st
             v2 = evaluate elseBranch st
-        in if v1 == v2 then v1 else S.SIte c v1 v2
+        in if v1 == v2 then v1 else sIte c v1 v2
     C.BinaryExpr lhs op rhs                  ->
         let v1 = evaluate lhs st
             v2 = evaluate rhs st
-        in S.SBinOp op v1 v2
+        in sBinOp op v1 v2
     C.UnaryExpr op e                         ->
         let v = evaluate e st
-        in S.SUnaryOp op v
+        in sUnaryOp op v
     _ -> case exprToPath expr of
-        Just path -> fromMaybe (S.SVar path) (Map.lookup path (S.store st))
+        Just path -> fromMaybe (sVar path) (lookupStore path st)
         Nothing   -> S.STop
 
 nullabilityProblem :: LinterState -> Dataflow Node EdgeType S.SState
@@ -205,7 +208,7 @@ nullabilityProblem lst = Dataflow
             in if isPointerType ty then S.assign path v s else s
         C.VarDeclStmt (Fix (C.VarDecl _ (C.L _ _ name) _)) Nothing ->
             let path = PathVar (Text.unpack name)
-            in S.assign path (S.SVar path) s
+            in S.assign path (sVar path) s
         C.AssignExpr lhs AopEq rhs ->
             let v = evaluate rhs s
             in case exprToPath lhs of

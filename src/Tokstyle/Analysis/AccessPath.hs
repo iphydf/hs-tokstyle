@@ -3,6 +3,7 @@
 module Tokstyle.Analysis.AccessPath
     ( AccessPath (..)
     , isPathPrefixOf
+    , pathDepth
     ) where
 
 import           Prettyprinter (Pretty (..))
@@ -32,3 +33,11 @@ isPathPrefixOf p1 (PathDeref p2)   = p1 `isPathPrefixOf` p2
 isPathPrefixOf p1 (PathField p2 _) = p1 `isPathPrefixOf` p2
 isPathPrefixOf PathReturn _        = False
 isPathPrefixOf _ _                 = False
+
+pathDepth :: AccessPath -> Int
+pathDepth = \case
+    PathVar _     -> 1
+    PathParam _   -> 1
+    PathReturn    -> 1
+    PathDeref p   -> 1 + pathDepth p
+    PathField p _ -> 1 + pathDepth p

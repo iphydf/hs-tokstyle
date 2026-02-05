@@ -10,6 +10,13 @@ module Tokstyle.Analysis.Symbolic
     , canBeNull
     , merge
     , negateConstraint
+    , sIte
+    , sBinOp
+    , sUnaryOp
+    , sVar
+    , sAddr
+    , valDepth
+    , lookupStore
     ) where
 
 import           Control.Applicative          ((<|>))
@@ -49,17 +56,70 @@ data SState = SState
 emptyState :: SState
 emptyState = SState Map.empty Set.empty
 
+valDepth :: SVal -> Int
+valDepth = \case
+    SVar p         -> pathDepth p
+    SAddr p        -> pathDepth p
+    SBinOp _ v1 v2 -> 1 + max (valDepth v1) (valDepth v2)
+    SUnaryOp _ v   -> 1 + valDepth v
+    SIte c t e     -> 1 + max (valDepth c) (max (valDepth t) (valDepth e))
+    _              -> 1
+
+sVar :: AccessPath -> SVal
+sVar p | pathDepth p > 10 = STop
+       | otherwise = SVar p
+
+sAddr :: AccessPath -> SVal
+sAddr p | pathDepth p > 10 = STop
+        | otherwise = SAddr p
+
+sIte :: SVal -> SVal -> SVal -> SVal
+sIte c t e
+    | t == e = t
+    | SUnaryOp UopNot c' <- c = sIte c' e t
+    | SIte c' t' _ <- t, c == c' = sIte c t' e
+    | SIte c' _ e' <- e, c == c' = sIte c t e'
+    | valDepth c > 10 || valDepth t > 10 || valDepth e > 10 = STop
+    | otherwise = SIte c t e
+
+sBinOp :: BinaryOp -> SVal -> SVal -> SVal
+sBinOp op v1 v2
+    | valDepth v1 > 10 || valDepth v2 > 10 = STop
+    | otherwise = SBinOp op v1 v2
+
+sUnaryOp :: UnaryOp -> SVal -> SVal
+sUnaryOp UopNot (SUnaryOp UopNot v) = v
+sUnaryOp op v
+    | valDepth v > 10 = STop
+    | otherwise = SUnaryOp op v
+
+lookupStore :: AccessPath -> SState -> Maybe SVal
+lookupStore path st = go path
+  where
+    go p = case Map.lookup p (store st) of
+        Just v -> Just v
+        Nothing -> case p of
+            PathField p' _ -> case go p' of
+                Just STop -> Just STop
+                _         -> Nothing
+            PathDeref p'   -> case go p' of
+                Just STop -> Just STop
+                _         -> Nothing
+            _              -> Nothing
+
 -- | Assign a value to a path, and handle invalidation of dependent paths.
 assign :: AccessPath -> SVal -> SState -> SState
 assign path val st =
     let -- Remove the path and all paths that have it as a prefix (e.g. assigning to 'p' invalidates 'p->x')
         store' = Map.filterWithKey (\k _ -> not (path `isPathPrefixOf` k)) (store st)
-        store'' = Map.insert path val store'
+        store'' = if val == STop then store' else Map.insert path val store'
     in st { store = store'' }
 
 -- | Add a new constraint to the state, with basic simplification.
 addConstraint :: Constraint -> SState -> SState
-addConstraint c st = st { constraints = Set.union (constraints st) (simplify c) }
+addConstraint c st
+    | Set.size (constraints st) > 100 = st
+    | otherwise = st { constraints = Set.union (constraints st) (simplify c) }
   where
     simplify = \case
         SBool (SBinOp BopNe v SNull) -> Set.singleton (SNotEquals v SNull)
@@ -77,16 +137,18 @@ addConstraint c st = st { constraints = Set.union (constraints st) (simplify c) 
 
 negateConstraint :: Constraint -> Constraint
 negateConstraint = \case
-    SEquals v1 v2    -> SNotEquals v1 v2
-    SNotEquals v1 v2 -> SEquals v1 v2
-    SBool v          -> SBool (SUnaryOp UopNot v)
+    SEquals v1 v2             -> SNotEquals v1 v2
+    SNotEquals v1 v2          -> SEquals v1 v2
+    SBool (SUnaryOp UopNot v) -> SBool v
+    SBool v                   -> SBool (sUnaryOp UopNot v)
 
 -- | Solver: check if a value is known to be non-null.
 -- Takes a predicate to check if an initial SVar is known to be non-null (e.g. from declarations).
 canBeNull :: (SVal -> Bool) -> SVal -> SState -> Bool
-canBeNull isDeclNonNull val st = not (isKnownNonNull (Set.singleton val) Set.empty)
+canBeNull isDeclNonNull val st = not (isKnownNonNull (0 :: Int) (Set.singleton val) Set.empty st)
   where
-    isKnownNonNull todo seen
+    isKnownNonNull depth todo seen s
+        | depth > 10 = False -- Limit recursion
         | Set.null todo = False
         | otherwise =
             let (v, todo') = Set.deleteFindMin todo
@@ -97,21 +159,23 @@ canBeNull isDeclNonNull val st = not (isKnownNonNull (Set.singleton val) Set.emp
                     SNull -> False
                     SAddr _ -> True
                     SBinOp op _ _ | isComparison op -> True
-                    SIte STop t e -> (not (canBeNull isDeclNonNull t st)) &&
-                                     (not (canBeNull isDeclNonNull e st))
-                    SIte c t e -> (not (canBeNull isDeclNonNull t (addConstraint (SBool c) st))) &&
-                                  (not (canBeNull isDeclNonNull e (addConstraint (negateConstraint (SBool c)) st)))
+                    SIte STop t e -> (not (canBeNull' (depth + 1) t s)) &&
+                                     (not (canBeNull' (depth + 1) e s))
+                    SIte c t e -> (not (canBeNull' (depth + 1) t (addConstraint (SBool c) s))) &&
+                                  (not (canBeNull' (depth + 1) e (addConstraint (negateConstraint (SBool c)) s)))
                     _ -> isDeclNonNull v ||
-                         any (isNonNullConstraint v) (constraints st) ||
-                         any (isEqualAddress v) (constraints st)
+                         any (isNonNullConstraint v) (constraints s) ||
+                         any (isEqualAddress v) (constraints s)
 
                 -- Find symbols equal to this one that we haven't checked yet
                 equals = Set.fromList [ if v1 == v then v2 else v1
-                                      | SEquals v1 v2 <- Set.toList (constraints st)
+                                      | SEquals v1 v2 <- Set.toList (constraints s)
                                       , v1 == v || v2 == v
                                       ]
                 todo'' = (todo' `Set.union` equals) `Set.difference` seen'
-            in direct || isKnownNonNull todo'' seen'
+            in direct || isKnownNonNull (depth + 1) todo'' seen' s
+
+    canBeNull' d v s = not (isKnownNonNull d (Set.singleton v) Set.empty s)
 
     isComparison = \case
         BopEq  -> True
@@ -152,17 +216,17 @@ merge isDeclNonNull mCond s1 s2 =
         allPaths = Map.keysSet (store s1) `Set.union` Map.keysSet (store s2)
         nonNullConstraints = [ SNotEquals v_merged SNull
                              | path <- Set.toList allPaths
-                             , let v1 = fromMaybe (SVar path) (Map.lookup path (store s1))
-                                   v2 = fromMaybe (SVar path) (Map.lookup path (store s2))
+                             , let v1 = fromMaybe (sVar path) (lookupStore path s1)
+                                   v2 = fromMaybe (sVar path) (lookupStore path s2)
                              , not (canBeNull isDeclNonNull v1 s1)
                              , not (canBeNull isDeclNonNull v2 s2)
-                             , let v_merged = fromMaybe (SVar path) (Map.lookup path (store st))
+                             , let v_merged = fromMaybe (sVar path) (lookupStore path st)
                              ]
     in foldl (flip addConstraint) st nonNullConstraints
   where
     mergeVal mC _ v1 v2
         | v1 == v2 = v1
-        | Just c <- mC = SIte c v1 v2
+        | Just c <- mC = sIte c v1 v2
         | otherwise = STop
 
 -- | Infer the condition that separates two states by looking for mismatched constraints.
@@ -172,6 +236,6 @@ inferCond s1 s2 = listToMaybe $ concatMap tryInfer (Set.toList (constraints s1))
     tryInfer c1 = if negateConstraint c1 `Set.member` constraints s2
                   then case c1 of
                         SBool v          -> [v]
-                        SEquals v1 v2    -> [SBinOp BopEq v1 v2]
-                        SNotEquals v1 v2 -> [SBinOp BopNe v1 v2]
+                        SEquals v1 v2    -> [sBinOp BopEq v1 v2]
+                        SNotEquals v1 v2 -> [sBinOp BopNe v1 v2]
                   else []
