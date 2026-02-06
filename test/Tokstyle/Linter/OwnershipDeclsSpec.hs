@@ -39,6 +39,8 @@ spec = do
              , "    |"
              , "   1| int * _Owner foo(void) { return 0; }"
              , "    |              ^^^"
+             , "    |              |"
+             , "    |              found qualifier here"
              ]]
 
     it "reports multiple qualifiers when present" $ do
@@ -48,6 +50,8 @@ spec = do
              , "    |"
              , "   1| int * _Owner _Nullable foo(void) { return 0; }"
              , "    |                        ^^^"
+             , "    |                        |"
+             , "    |                        found qualifier here"
              ]]
 
     it "forbids qualifiers on global definitions even if declared before" $ do
@@ -60,6 +64,8 @@ spec = do
              , "    |"
              , "   2| int * _Owner foo(void) { return 0; }"
              , "    |              ^^^"
+             , "    |              |"
+             , "    |              found qualifier here"
              ]]
 
     it "forbids qualifiers on static definitions if declared before" $ do
@@ -72,6 +78,8 @@ spec = do
              , "    |"
              , "   2| static int * _Owner foo(void) { return 0; }"
              , "    |                     ^^^"
+             , "    |                     |"
+             , "    |                     found qualifier here"
              ]]
 
     it "allows qualifiers on static definitions if NOT declared before" $ do
@@ -84,6 +92,8 @@ spec = do
              , "    |"
              , "   1| void foo(int * _Owner p) { return; }"
              , "    |      ^^^"
+             , "    |      |"
+             , "    |      found qualifier here"
              ]]
 
     it "warns on unannotated pointer return types in declarations" $ do
@@ -93,6 +103,8 @@ spec = do
              , "    |"
              , "   1| int *foo(void);"
              , "    | ^^^"
+             , "    | |"
+             , "    | missing annotation here"
              ]]
 
     it "warns on unannotated pointer parameters in declarations" $ do
@@ -102,6 +114,8 @@ spec = do
              , "    |"
              , "   1| void foo(int *p);"
              , "    |               ^"
+             , "    |               |"
+             , "    |               missing annotation here"
              ]]
 
     it "warns on unannotated pointer return types in static definitions without prior declaration" $ do
@@ -111,6 +125,8 @@ spec = do
              , "    |"
              , "   1| static int *foo(void) { return 0; }"
              , "    |        ^^^"
+             , "    |        |"
+             , "    |        missing annotation here"
              ]]
 
     it "warns on unannotated pointer parameters in static definitions without prior declaration" $ do
@@ -120,6 +136,8 @@ spec = do
              , "    |"
              , "   1| static void foo(int *p) { return; }"
              , "    |                      ^"
+             , "    |                      |"
+             , "    |                      missing annotation here"
              ]]
 
     it "warns on unannotated pointer struct members" $ do
@@ -129,6 +147,8 @@ spec = do
              , "    |"
              , "   1| struct Foo { int *p; };"
              , "    |                   ^"
+             , "    |                   |"
+             , "    |                   missing annotation here"
              ]]
 
     it "ignores third_party files" $ do
@@ -166,6 +186,14 @@ spec = do
              , "    |"
              , "   1| int *foo(void) { return 0; }"
              , "    | ^^^"
+             , "    | |"
+             , "    | missing annotation here"
+             , "   ::: tox.h:1:1"
+             , "    |"
+             , "   1| int *foo(void);"
+             , "    | ^^^^^^^^^^^^^"
+             , "    | |"
+             , "    | because declaration here is unannotated"
              ]]
 
     it "forbids annotations on definitions if already present in public header decl" $ do
@@ -178,6 +206,14 @@ spec = do
              , "    |"
              , "   1| int *_Nonnull foo(void) { return 0; }"
              , "    |               ^^^"
+             , "    |               |"
+             , "    |               found qualifier here"
+             , "   ::: tox.h:1:1"
+             , "    |"
+             , "   1| int *_Nonnull foo(void);"
+             , "    | ^^^^^^^^^^^^^^^^^^^^^^"
+             , "    | |"
+             , "    | should be added here instead"
              ]]
 
     it "allows unannotated definitions if already present in public header decl" $ do
@@ -202,6 +238,8 @@ spec = do
              , "    |"
              , "   1| void foo(my_cb cb);"
              , "    |                ^^"
+             , "    |                |"
+             , "    |                missing annotation here"
              ]]
 
     it "accepts annotations on function type typedefs" $ do
@@ -209,5 +247,55 @@ spec = do
             [ ("types.h", [ "typedef void my_cb(int p);" ])
             , ("foo.h", [ "void foo(my_cb _Nonnull cb);" ])
             ]
+
+    it "allows annotations in .c file even if the public typedef is collected after the usage" $ do
+        -- Here tox.h (typedef) comes after events.h (usage)
+        shouldAccept ["ownership-decls"]
+            [ ("events.h", [ "public_cb handle_event;" ])
+            , ("tox.h", [ "typedef void public_cb(int *p);" ])
+            , ("implementation.c", [ "void handle_event(int *_Nonnull p) { /* p */ }" ])
+            ]
+
+    it "allows annotations in .c file when implementing a public callback typedef" $ do
+        shouldAccept ["ownership-decls"]
+            [ ("tox.h", [ "typedef void public_cb(int *p);" ])
+            , ("events.h", [ "public_cb handle_event;" ])
+            , ("implementation.c", [ "void handle_event(int *_Nonnull p) { /* p */ }" ])
+            ]
+
+    it "forbids annotations in .c file when implementing an internal callback typedef" $ do
+        shouldWarn ["ownership-decls"]
+            [ ("internal.h", [ "typedef void internal_cb(int *p);" ])
+            , ("events.h", [ "internal_cb handle_event;" ])
+            , ("implementation.c", [ "void handle_event(int *_Nonnull p) { /* p */ }" ])
+            ]
+            [[ "warning: pointer type `internal_cb handle_event` should have an explicit nullability annotation (`_Nullable` or `_Nonnull`) [-Wownership-decls]"
+             , "   --> events.h:1:13"
+             , "    |"
+             , "   1| internal_cb handle_event;"
+             , "    |             ^^^^^^^^^^^^"
+             , "    |             |"
+             , "    |             missing annotation here"
+             , "   ::: internal.h:1:9"
+             , "    |"
+             , "   1| typedef void internal_cb(int *p);"
+             , "    |         ^^^^^^^^^^^^^^^^^^^^^^^"
+             , "    |         |"
+             , "    |         because declaration here is unannotated"
+             ]
+            ,[ "warning: qualifier `_Nonnull` should only be used on function declarations, not definitions [-Wownership-decls]"
+             , "   --> implementation.c:1:6"
+             , "    |"
+             , "   1| void handle_event(int *_Nonnull p) { /* p */ }"
+             , "    |      ^^^^^^^^^^^^"
+             , "    |      |"
+             , "    |      found qualifier here"
+             , "   ::: internal.h:1:9"
+             , "    |"
+             , "   1| typedef void internal_cb(int *p);"
+             , "    |         ^^^^^^^^^^^^^^^^^^^^^^^"
+             , "    |         |"
+             , "    |         should be added here instead"
+             ]]
 
 -- end of tests

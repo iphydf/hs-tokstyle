@@ -9,12 +9,13 @@
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 module Tokstyle.Linter.Nullability (descr) where
 
-import           Control.Monad                (foldM, forM_, unless, void, when)
+import           Control.Monad                (foldM, forM, forM_, unless, void,
+                                               when)
 import           Control.Monad.State.Strict   (State)
 import qualified Control.Monad.State.Strict   as State
 import           Data.Fix                     (Fix (..), unFix)
 import           Data.Foldable                (traverse_)
-import           Data.List                    (find)
+import           Data.List                    (find, zip3)
 import           Data.Map.Strict              (Map)
 import qualified Data.Map.Strict              as Map
 import           Data.Maybe                   (fromMaybe)
@@ -26,11 +27,14 @@ import           Language.Cimple              (AssignOp (..), BinaryOp (..),
                                                Lexeme (..), NodeF (..),
                                                UnaryOp (..))
 import qualified Language.Cimple              as C
-import           Language.Cimple.Diagnostics  (CimplePos, Diagnostic)
+import           Language.Cimple.Diagnostics  (CimplePos, Diagnostic (..),
+                                               DiagnosticLevel (..),
+                                               DiagnosticSpan (..),
+                                               nodePosAndLen, warnRich)
 import           Language.Cimple.Pretty       (ppNode, showNodePlain)
 import           Language.Cimple.TraverseAst  (AstActions, astActions, doNode,
                                                traverseAst)
-import           Prettyprinter                (pretty, (<+>))
+import           Prettyprinter                (parens, pretty, (<+>))
 import           Tokstyle.Analysis.AccessPath
 import           Tokstyle.Analysis.Dataflow   (Dataflow (..), solve)
 import qualified Tokstyle.Analysis.Symbolic   as S
@@ -55,7 +59,7 @@ type TypeEnv = Map Text VarInfo
 data LinterState = LinterState
     { typeEnv        :: TypeEnv
     , structDefs     :: Map Text TypeEnv
-    , functionDefs   :: Map Text (Nullability, [Nullability])
+    , functionDefs   :: Map Text (Nullability, [(Text, Nullability)])
     , currentFile    :: FilePath
     , currentFuncRet :: Nullability
     }
@@ -64,35 +68,44 @@ type LinterM = State.StateT LinterState (State [Diagnostic CimplePos])
 
 isNullable :: C.Node (Lexeme Text) -> Bool
 isNullable (Fix node) = case node of
-    C.TyNullable _  -> True
-    C.TyPointer t   -> isNullable t
-    C.TyConst t     -> isNullable t
-    C.TyForce t     -> isNullable t
-    C.VarDecl t _ _ -> isNullable t
-    _               -> False
+    C.TyNullable _      -> True
+    C.TyPointer t       -> isNullable t
+    C.TyConst t         -> isNullable t
+    C.TyForce t         -> isNullable t
+    C.VarDecl ty _ specs ->
+        if any isArraySpec specs
+        then any isNullable specs
+        else isNullable ty
+    C.DeclSpecArray C.Nullable _ -> True
+    _                   -> False
 
 isNonnull :: C.Node (Lexeme Text) -> Bool
 isNonnull (Fix node) = case node of
-    C.TyNonnull _   -> True
-    C.TyPointer t   -> isNonnull t
-    C.TyConst t     -> isNonnull t
-    C.TyForce t     -> isNonnull t
-    C.VarDecl t _ _ -> isNonnull t
-    _               -> False
+    C.TyNonnull _       -> True
+    C.TyPointer t       -> isNonnull t
+    C.TyConst t         -> isNonnull t
+    C.TyForce t         -> isNonnull t
+    C.VarDecl ty _ specs ->
+        if any isArraySpec specs
+        then any isNonnull specs
+        else isNonnull ty
+    C.DeclSpecArray C.Nonnull _ -> True
+    _                   -> False
 
 isPointerType :: C.Node (Lexeme Text) -> Bool
 isPointerType (Fix node) = case node of
-    C.TyPointer _     -> True
-    C.TyNullable t    -> isPointerType t
-    C.TyNonnull t     -> isPointerType t
-    C.TyConst t       -> isPointerType t
-    C.TyForce t       -> isPointerType t
-    C.VarDecl t _ _   -> isPointerType t
-    C.TyStd _         -> False
-    C.TyStruct _      -> False
-    C.TyUnion _       -> False
-    C.TyUserDefined _ -> True -- Assume pointers can be hidden in typedefs if we don't know
-    _                 -> False
+    C.TyPointer _        -> True
+    C.TyNullable t       -> isPointerType t
+    C.TyNonnull t        -> isPointerType t
+    C.TyConst t          -> isPointerType t
+    C.TyForce t          -> isPointerType t
+    C.VarDecl ty _ specs -> isPointerType ty || any isArraySpec specs
+    C.TyStd _            -> False
+    C.TyStruct _         -> False
+    C.TyUnion _          -> False
+    C.TyUserDefined _    -> True -- Assume pointers can be hidden in typedefs if we don't know
+    C.DeclSpecArray {}   -> True
+    _                    -> False
 
 exprToPath :: C.Node (Lexeme Text) -> Maybe AccessPath
 exprToPath (Fix node) = case node of
@@ -250,8 +263,8 @@ collectTypeEnv = flip State.execState Map.empty . traverseAst actions
   where
     actions = astActions
         { doNode = \_ node act -> case unFix node of
-            C.VarDecl ty (C.L _ _ name) specs -> do
-                let nullability = if any isArraySpec specs then NonNullVar else getNullability' ty
+            C.VarDecl _ (C.L _ _ name) _ -> do
+                let nullability = getNullability' node
                 State.modify $ Map.insert name (nullability, Just node)
                 act
             _ -> act
@@ -352,7 +365,7 @@ analyseExpr st expr@(Fix fixNode) = case fixNode of
 
         case mFuncInfo' of
             Just (_, paramNullabilities) ->
-                forM_ (zip args paramNullabilities) $ \(arg, paramNullability) ->
+                forM_ (zip args paramNullabilities) $ \(arg, (_, paramNullability)) ->
                     let v = evaluate arg st'
                         -- Don't warn again if it's a non-null cast (CastExpr already warned)
                         isCastToNonnull = case unFix arg of
@@ -409,9 +422,9 @@ analyseExpr st expr@(Fix fixNode) = case fixNode of
 
 data ProgramDefs = ProgramDefs
     { programStructs   :: Map Text TypeEnv
-    , programFunctions :: Map Text (Nullability, [Nullability], FilePath, C.Node (Lexeme Text))
+    , programFunctions :: Map Text (Nullability, [(Text, Nullability)], FilePath, C.Node (Lexeme Text))
     , programGlobals   :: TypeEnv
-    , programTypedefs  :: Map Text (Nullability, [Nullability])
+    , programTypedefs  :: Map Text (Nullability, [(Text, Nullability)])
     }
 
 mergeNullability :: Nullability -> Nullability -> Maybe Nullability
@@ -420,13 +433,25 @@ mergeNullability x UnspecifiedNullability = Just x
 mergeNullability x y                      | x == y              = Just x
 mergeNullability _ _                      = Nothing
 
-mergeFunctionNullability :: (Nullability, [Nullability]) -> (Nullability, [Nullability]) -> Maybe (Nullability, [Nullability])
-mergeFunctionNullability (r1, p1) (r2, p2) = do
-    r <- mergeNullability r1 r2
+data Mismatch
+    = RetMismatch Nullability Nullability
+    | ParamMismatch Int Text Nullability Nullability
+    | ParamCountMismatch Int Int
+
+mergeFunctionInfos :: (Nullability, [(Text, Nullability)]) -> (Nullability, [(Text, Nullability)]) -> Either Mismatch (Nullability, [(Text, Nullability)])
+mergeFunctionInfos (r1, p1) (r2, p2) = do
+    r <- maybe (Left $ RetMismatch r1 r2) Right $ mergeNullability r1 r2
     p <- if length p1 == length p2
-         then mapM (uncurry mergeNullability) (zip p1 p2)
-         else Nothing
+         then forM (zip3 [0..] p1 p2) $ \(i, (n1, v1), (_, v2)) ->
+            case mergeNullability v1 v2 of
+                Just v  -> Right (n1, v)
+                Nothing -> Left $ ParamMismatch i n1 v1 v2
+         else Left $ ParamCountMismatch (length p1) (length p2)
     return (r, p)
+
+getParams :: C.Node (Lexeme Text) -> [C.Node (Lexeme Text)]
+getParams (Fix (C.FunctionPrototype _ _ ps)) = ps
+getParams _                                  = []
 
 collectDefs :: AstActions (State (ProgramDefs, [Diagnostic CimplePos])) Text
 collectDefs = astActions
@@ -441,25 +466,53 @@ collectDefs = astActions
                     Just name -> do
                         let (Fix (C.FunctionPrototype retType _ params)) = proto
                         let retNullability = getNullability' retType
-                        let paramNullabilities = map getParamNullability params
-                        State.modify $ \(s, errs) -> (s { programTypedefs = Map.insert name (retNullability, paramNullabilities) (programTypedefs s) }, errs)
+                        let paramInfos = map getParamInfo params
+                        State.modify $ \(s, errs) -> (s { programTypedefs = Map.insert name (retNullability, paramInfos) (programTypedefs s) }, errs)
                     Nothing -> return ()
                 act
             C.FunctionPrototype retType (C.L _ _ name) params -> do
                 let retNullability = getNullability' retType
-                let paramNullabilities = map getParamNullability params
+                let currentParamInfos = map getParamInfo params
                 (s, errs) <- State.get
                 case Map.lookup name (programFunctions s) of
                     Nothing ->
-                        State.put (s { programFunctions = Map.insert name (retNullability, paramNullabilities, file, node) (programFunctions s) }, errs)
-                    Just (oldRet, oldParams, oldFile, _) ->
-                        case mergeFunctionNullability (oldRet, oldParams) (retNullability, paramNullabilities) of
-                            Just (newRet, newParams) ->
-                                State.put (s { programFunctions = Map.insert name (newRet, newParams, oldFile, node) (programFunctions s) }, errs)
-                            Nothing -> do
-                                let errs' = flip State.execState errs $
-                                        warnDoc file node $ "nullability mismatch for function" <+> backticks (pretty name) <> ", conflicts with declaration at" <+> pretty oldFile
-                                State.put (s, errs')
+                        State.put (s { programFunctions = Map.insert name (retNullability, currentParamInfos, file, node) (programFunctions s) }, errs)
+                    Just (oldRet, oldParamInfos, oldFile, oldNode) ->
+                        case mergeFunctionInfos (oldRet, oldParamInfos) (retNullability, currentParamInfos) of
+                            Right (newRet, newParamInfos) ->
+                                State.put (s { programFunctions = Map.insert name (newRet, newParamInfos, oldFile, node) (programFunctions s) }, errs)
+                            Left mismatch -> do
+                                let (pos, len) = nodePosAndLen file node
+                                let diag = case mismatch of
+                                        RetMismatch _ _ ->
+                                            Diagnostic pos len WarningLevel
+                                                ("nullability mismatch for return type of function" <+> backticks (pretty name))
+                                                (Just "nullability")
+                                                [ DiagnosticSpan (fst $ nodePosAndLen oldFile oldNode) (snd $ nodePosAndLen oldFile oldNode) [ "conflict with declaration here" ]
+                                                , DiagnosticSpan pos len [ "found mismatch here" ]
+                                                ]
+                                                []
+                                        ParamMismatch i pname _ _ ->
+                                            let oldParam = getParams oldNode !! i
+                                                newParam = params !! i
+                                                (oldPos, oldLen) = nodePosAndLen oldFile oldParam
+                                                (newPos, newLen) = nodePosAndLen file newParam
+                                            in Diagnostic newPos newLen WarningLevel
+                                                ("nullability mismatch for parameter" <+> pretty (i + 1) <+> parens (backticks (pretty pname)) <+> "of function" <+> backticks (pretty name))
+                                                (Just "nullability")
+                                                [ DiagnosticSpan oldPos oldLen [ "conflict with declaration here" ]
+                                                , DiagnosticSpan newPos newLen [ "found mismatch here" ]
+                                                ]
+                                                []
+                                        ParamCountMismatch _ _ ->
+                                            Diagnostic pos len WarningLevel
+                                                ("parameter count mismatch for function" <+> backticks (pretty name))
+                                                (Just "nullability")
+                                                [ DiagnosticSpan (fst $ nodePosAndLen oldFile oldNode) (snd $ nodePosAndLen oldFile oldNode) [ "conflict with declaration here" ]
+                                                , DiagnosticSpan pos len [ "found mismatch here" ]
+                                                ]
+                                                []
+                                State.put (s, diag : errs)
                                 act
             C.ConstDecl ty (C.L _ _ name) -> do
                 State.modify $ \(s, errs) -> (s { programGlobals = Map.insert name (getNullability' ty, Just ty) (programGlobals s) }, errs)
@@ -474,12 +527,10 @@ collectDefs = astActions
         [(C.lexemeText name, (getNullability' ty, Just ty))]
     getFieldDecls _ = []
 
-    getParamNullability (Fix (C.VarDecl ty _ specs))
-        | any isArraySpec specs = NonNullVar
-        | any isNullable specs || isNullable ty = NullableVar
-        | any isNonnull specs || isNonnull ty = NonNullVar
-        | otherwise = UnspecifiedNullability
-    getParamNullability _ = NonNullVar
+    getParamInfo node@(Fix (C.VarDecl {})) =
+        let (C.VarDecl _ (C.L _ _ name) _) = unFix node
+        in (name, getNullability' node)
+    getParamInfo _ = ("", NonNullVar)
 
 runAnalysis :: C.Node (Lexeme Text) -> LinterM ()
 runAnalysis defn@(Fix (C.FunctionDefn _ proto body)) = do
@@ -546,7 +597,7 @@ linter pdefs = astActions
                 let localParams = getParamTypes proto
                     (retNull, mergedParamsInfo) = case Map.lookup name (programFunctions pdefs) of
                         Just (r, mergedParams, _, _) | length mergedParams == length localParams ->
-                            (r, zipWith (\(n, (_, ty)) m -> (n, (m, ty))) localParams mergedParams)
+                            (r, zipWith (\(n, (_, ty)) (_, m) -> (n, (m, ty))) localParams mergedParams)
                         _ -> (getNullability' retType, localParams)
                     tenv = Map.union (Map.fromList mergedParamsInfo) (programGlobals pdefs)
                     fDefs = Map.union (Map.map (\(r, p, _, _) -> (r, p)) (programFunctions pdefs)) (programTypedefs pdefs)

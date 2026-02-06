@@ -19,9 +19,12 @@ import qualified Data.Text                   as Text
 import           Language.Cimple             (Lexeme (..), Node, NodeF (..),
                                               Nullability (..), Scope (..),
                                               lexemeText)
-import           Language.Cimple.Diagnostics (CimplePos, Diagnostic,
+import           Language.Cimple.Diagnostics (CimplePos, Diagnostic (..),
+                                              DiagnosticLevel (..),
+                                              DiagnosticSpan (..),
                                               HasDiagnosticInfo (..),
-                                              HasDiagnosticsRich (..))
+                                              HasDiagnosticsRich (..),
+                                              nodePosAndLen, warnRich)
 import           Language.Cimple.Pretty      (ppNode)
 import           Language.Cimple.TraverseAst (AstActions, astActions, doNode,
                                               traverseAst)
@@ -32,16 +35,19 @@ import           Tokstyle.Common             (backticks, functionName, warnDoc)
 data DeclInfo = DeclInfo
     { declAnnotated    :: Bool
     , declPublicHeader :: Bool
+    , declFile         :: FilePath
+    , declNode         :: Node (Lexeme Text)
     }
 
 data Linter = Linter
-    { diags           :: [Diagnostic CimplePos]
-    , decls           :: Map Text DeclInfo
-    , pointerTypedefs :: Set Text
+    { diags            :: [Diagnostic CimplePos]
+    , decls            :: Map Text DeclInfo
+    , functionTypedefs :: Map Text DeclInfo
+    , pointerTypedefs  :: Set Text
     }
 
 empty :: Linter
-empty = Linter [] Map.empty Set.empty
+empty = Linter [] Map.empty Map.empty Set.empty
 
 
 instance HasDiagnosticsRich Linter CimplePos where
@@ -56,6 +62,10 @@ hasNullability l (Fix node) = case node of
     TyConst t         -> hasNullability l t
     TyForce t         -> hasNullability l t
     VarDecl t _ specs -> hasNullability l t || any isAnnotatedArray specs
+    CallbackDecl (L _ _ typeName) _ ->
+        case Map.lookup typeName (functionTypedefs l) of
+            Just info -> declAnnotated info
+            Nothing   -> False
     _                 -> False
   where
     isAnnotatedArray (Fix (DeclSpecArray n _)) = n /= NullabilityUnspecified
@@ -64,15 +74,16 @@ hasNullability l (Fix node) = case node of
 
 isPointerType :: Linter -> Node (Lexeme Text) -> Bool
 isPointerType l (Fix node) = case node of
-    TyPointer _                -> True
-    TyNullable t               -> isPointerType l t
-    TyNonnull t                -> isPointerType l t
-    TyConst t                  -> isPointerType l t
-    TyForce t                  -> isPointerType l t
-    VarDecl t _ specs          -> isPointerType l t || any isArray specs
-    TyUserDefined (L _ _ name) -> name `Set.member` pointerTypedefs l
-    TyFunc (L _ _ name)        -> name `Set.member` pointerTypedefs l
-    _                          -> False
+    TyPointer _                     -> True
+    TyNullable t                    -> isPointerType l t
+    TyNonnull t                     -> isPointerType l t
+    TyConst t                       -> isPointerType l t
+    TyForce t                       -> isPointerType l t
+    VarDecl t _ specs               -> isPointerType l t || any isArray specs
+    TyUserDefined (L _ _ name)      -> name `Set.member` pointerTypedefs l
+    TyFunc (L _ _ name)             -> name `Set.member` pointerTypedefs l
+    CallbackDecl (L _ _ typeName) _ -> typeName `Set.member` pointerTypedefs l
+    _                               -> False
   where
     isArray (Fix (DeclSpecArray {})) = True
     isArray _                        = False
@@ -86,22 +97,29 @@ isPublicHeader :: FilePath -> Bool
 isPublicHeader path = any (`List.isSuffixOf` path) ["tox.h", "tox_events.h", "tox_dispatch.h", "toxav.h", "toxencryptsave.h", "tox_options.h", "tox_log_level.h"]
 
 
-checkNullability :: HasDiagnosticInfo at CimplePos => FilePath -> at -> Node (Lexeme Text) -> State Linter ()
-checkNullability file at ty = do
+checkNullability :: HasDiagnosticInfo at CimplePos => FilePath -> at -> Node (Lexeme Text) -> Maybe DeclInfo -> State Linter ()
+checkNullability file at ty mDeclInfo = do
     l <- State.get
     when (isPointerType l ty && not (hasNullability l ty)) $
-        warnDoc file at $ "pointer type" <+> backticks (ppNode ty)
-            <+> "should have an explicit nullability annotation (`_Nullable` or `_Nonnull`)"
+        let (pos, len) = getDiagnosticInfo file at
+            msg = "pointer type" <+> backticks (ppNode ty)
+                  <+> "should have an explicit nullability annotation (`_Nullable` or `_Nonnull`)"
+            spans = [ DiagnosticSpan pos len [ "missing annotation here" ] ]
+                    ++ case mDeclInfo of
+                         Just info | declFile info /= file ->
+                             [ DiagnosticSpan (fst $ nodePosAndLen (declFile info) (declNode info)) (snd $ nodePosAndLen (declFile info) (declNode info)) [ "because declaration here is unannotated" ] ]
+                         _ -> []
+        in warnRich $ Diagnostic pos len WarningLevel msg (Just "ownership-decls") spans []
 
 
-checkPrototypeNullability :: FilePath -> Node (Lexeme Text) -> State Linter ()
-checkPrototypeNullability file (Fix (FunctionPrototype retType _ params)) = do
-    checkNullability file retType retType
+checkPrototypeNullability :: FilePath -> Node (Lexeme Text) -> Maybe DeclInfo -> State Linter ()
+checkPrototypeNullability file (Fix (FunctionPrototype retType _ params)) mDeclInfo = do
+    checkNullability file retType retType mDeclInfo
     mapM_ checkParamNullability params
   where
-    checkParamNullability (Fix (VarDecl ty name _)) = checkNullability file name ty
+    checkParamNullability (Fix (VarDecl ty name _)) = checkNullability file name ty mDeclInfo
     checkParamNullability _                         = return ()
-checkPrototypeNullability _ _ = return ()
+checkPrototypeNullability _ _ _ = return ()
 
 
 findQualifiers :: Node (Lexeme Text) -> [Text]
@@ -122,8 +140,8 @@ findPrototypeQualifiers (Fix (FunctionPrototype retType _ params)) =
 findPrototypeQualifiers _ = []
 
 
-collectDefsWithFile :: AstActions (State Linter) Text
-collectDefsWithFile = astActions
+collectTypedefs :: AstActions (State Linter) Text
+collectTypedefs = astActions
     { doNode = \file node act ->
         case unFix node of
             Typedef ty name specs -> do
@@ -137,12 +155,33 @@ collectDefsWithFile = astActions
 
             TypedefFunction proto -> do
                 case functionName proto of
-                    Just name -> State.modify $ \s -> s { pointerTypedefs = Set.insert name (pointerTypedefs s) }
+                    Just name -> do
+                        let isAnnotated = not . null $ findPrototypeQualifiers proto
+                        State.modify $ \s -> s
+                            { pointerTypedefs = Set.insert name (pointerTypedefs s)
+                            , functionTypedefs = Map.insert name (DeclInfo isAnnotated (isPublicHeader file) file proto) (functionTypedefs s)
+                            }
                     Nothing -> return ()
                 act
 
-            FunctionDecl _ proto@(Fix (FunctionPrototype _ name _)) -> do
-                State.modify $ \s -> s { decls = Map.insert (lexemeText name) (DeclInfo (not . null $ findPrototypeQualifiers proto) (isPublicHeader file)) (decls s) }
+            _ -> act
+    }
+
+
+collectDecls :: AstActions (State Linter) Text
+collectDecls = astActions
+    { doNode = \file node act ->
+        case unFix node of
+            FunctionDecl _ proto -> do
+                case unFix proto of
+                    FunctionPrototype _ name _ ->
+                        State.modify $ \s -> s { decls = Map.insert (lexemeText name) (DeclInfo (not . null $ findPrototypeQualifiers proto) (isPublicHeader file) file proto) (decls s) }
+                    CallbackDecl typeNameLexeme nameLexeme -> do
+                        Linter{functionTypedefs} <- State.get
+                        case Map.lookup (lexemeText typeNameLexeme) functionTypedefs of
+                            Just info -> State.modify $ \s -> s { decls = Map.insert (lexemeText nameLexeme) info (decls s) }
+                            Nothing   -> return ()
+                    _ -> return ()
                 act
 
             _ -> act
@@ -153,8 +192,16 @@ linter :: AstActions (State Linter) Text
 linter = astActions
     { doNode = \file node act ->
         if isThirdParty file then act else case unFix node of
-            FunctionDecl _ proto@(Fix (FunctionPrototype _ name _)) -> do
-                unless (isPublicHeader file) $ checkPrototypeNullability file proto
+            FunctionDecl _ proto -> do
+                unless (isPublicHeader file) $
+                    case unFix proto of
+                        FunctionPrototype {} -> checkPrototypeNullability file proto Nothing
+                        CallbackDecl typeNameLexeme nameLexeme -> do
+                            Linter{functionTypedefs} <- State.get
+                            let mInfo = Map.lookup (lexemeText typeNameLexeme) functionTypedefs
+                            let isPublic = maybe False declPublicHeader mInfo
+                            unless isPublic $ checkNullability file nameLexeme proto mInfo
+                        _ -> return ()
                 act
 
             FunctionDefn scope proto@(Fix (FunctionPrototype _ name _)) _ -> do
@@ -165,15 +212,25 @@ linter = astActions
                 let shouldAllowQualifiers = case mInfo of
                         Just info -> declPublicHeader info && not (declAnnotated info)
                         Nothing   -> scope == Static
-                unless (null qs || shouldAllowQualifiers) $
-                    warnDoc file name $ "qualifier" <> (if length qs > 1 then "s" else "")
+                unless (null qs || shouldAllowQualifiers) $ do
+                    let (pos, len) = getDiagnosticInfo file name
+                        spans = [ DiagnosticSpan pos len [ "found qualifier here" ] ]
+                                ++ case mInfo of
+                                     Just info | declFile info /= file ->
+                                         [ DiagnosticSpan (fst $ nodePosAndLen (declFile info) (declNode info)) (snd $ nodePosAndLen (declFile info) (declNode info)) [ "should be added here instead" ] ]
+                                     _ -> []
+                    warnRich $ Diagnostic pos len WarningLevel
+                        ("qualifier" <> (if length qs > 1 then "s" else "")
                         <+> hsep (punctuate " and" (map (backticks . pretty) qs))
-                        <+> "should only be used on function declarations, not definitions"
+                        <+> "should only be used on function declarations, not definitions")
+                        (Just "ownership-decls")
+                        spans
+                        []
 
                 let shouldExpectAnnotations = case mInfo of
                         Just info -> declPublicHeader info && not (declAnnotated info)
                         Nothing   -> True
-                when shouldExpectAnnotations $ checkPrototypeNullability file proto
+                when shouldExpectAnnotations $ checkPrototypeNullability file proto mInfo
                 act
 
             Struct _ members -> do
@@ -181,7 +238,7 @@ linter = astActions
                 act
               where
                 checkMember (Fix (MemberDecl (Fix (VarDecl ty fieldName _)) _)) =
-                    checkNullability file fieldName ty
+                    checkNullability file fieldName ty Nothing
                 checkMember _ = return ()
 
             _ -> act
@@ -190,8 +247,9 @@ linter = astActions
 
 analyse :: [(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse tus =
-    let linterState = State.execState (traverseAst collectDefsWithFile tus) empty
-    in reverse . diags $ State.execState (traverseAst linter tus) linterState
+    let linterStateTypedefs = State.execState (traverseAst collectTypedefs tus) empty
+        linterStateDecls = State.execState (traverseAst collectDecls tus) linterStateTypedefs
+    in reverse . diags $ State.execState (traverseAst linter tus) linterStateDecls
 
 descr :: ([(FilePath, [Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("ownership-decls", Text.unlines

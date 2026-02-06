@@ -15,6 +15,7 @@ import           Data.Time.Clock               (UTCTime, diffUTCTime,
                                                 getCurrentTime)
 import           Language.Cimple               (Lexeme, Node)
 import           Language.Cimple.Diagnostics   (CimplePos, Diagnostic (..),
+                                                DiagnosticSpan (..),
                                                 IsPosition (..), renderPure)
 import           Language.Cimple.IO            (parseProgram)
 import qualified Language.Cimple.Program       as Program
@@ -35,7 +36,9 @@ processAst ignore (start, tus) = do
   where
     report [] = return ()
     report diags = do
-        let files = Map.keys . Map.fromList $ [ (posFile (diagPos e), ()) | e <- diags ]
+        let files = Map.keys . Map.fromList $
+                    [ (posFile (diagPos e), ()) | e <- diags ] ++
+                    [ (posFile (spanPos s), ()) | e <- diags, s <- diagSpans e ]
         cache <- Map.fromList <$> mapM (\f -> do
             ls <- Text.lines . Text.decodeUtf8 <$> BS.readFile f
             return (f, ls)) files

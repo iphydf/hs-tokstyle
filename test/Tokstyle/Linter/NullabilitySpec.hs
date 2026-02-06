@@ -614,3 +614,34 @@ spec = do
             -- if c1 is false, we get (p ? p : q). If p is true, p is non-null. If p is false, q is non-null.
             -- So the whole thing is non-null.
             shouldAccept' code
+
+    describe "cross-file diagnostics" $ do
+        it "does not warn when an unannotated array parameter mismatches an explicitly nullable definition" $ do
+            let code1 = [ "void f(int p[10]);" ]
+                code2 = [ "void f(int *_Nullable p) {"
+                        , "  /* p */"
+                        , "}"
+                        ]
+            shouldAccept ["nullability"] [("test.h", code1), ("test.c", code2)]
+
+        it "warns when a function definition mismatches its declaration in another file" $ do
+            let code1 = [ "bool my_func(int *_Nonnull p);" ]
+                code2 = [ "bool my_func(int *_Nullable p) {"
+                        , "  return p != nullptr;"
+                        , "}"
+                        ]
+            shouldWarn ["nullability"] [("test.h", code1), ("test.c", code2)]
+                [[ "warning: nullability mismatch for parameter 1 (`p`) of function `my_func` [-Wnullability]"
+                 , "   --> test.c:1:14"
+                 , "    |"
+                 , "   1| bool my_func(int *_Nullable p) {"
+                 , "    |              ^^^^^^^^^^^^^^^^"
+                 , "    |              |"
+                 , "    |              found mismatch here"
+                 , "   ::: test.h:1:14"
+                 , "    |"
+                 , "   1| bool my_func(int *_Nonnull p);"
+                 , "    |              ^^^^^^^^^^^^^^^"
+                 , "    |              |"
+                 , "    |              conflict with declaration here"
+                 ]]
