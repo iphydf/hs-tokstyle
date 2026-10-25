@@ -1,6 +1,6 @@
 # C-based linters (`check-c`)
 
-There are currently 14 linters implemented.
+There are currently 16 linters implemented.
 
 ## `-Wbool-conversion`
 
@@ -16,6 +16,17 @@ moves, and borrows of pointers marked with `__attribute__((owned))`.
 It also makes conservative assumptions about un-annotated functions to ensure
 soundness: it assumes the return value of a function borrows from all its
 non-owned pointer arguments.
+
+## `-Wbuffer-size`
+
+Checks for byte buffers whose size can wrap around and that are then accessed
+past the wrapped size: arrays of variable length, and memory from `alloca`,
+`malloc` or `mem_balloc`, accessed by `memcpy`, `memmove`, `memset` or indexing.
+
+**Reason:** `const uint16_t size = length + HEADER_SIZE;` truncates to a small
+value when `length` is close to 65536, and copying `length` bytes into a
+buffer of that size writes past its end. Compute sizes in a type that can hold
+them, and limit them before making the buffer.
 
 ## `-Wcallback-data`
 
@@ -78,3 +89,19 @@ role-based types.
 ## `-Wvoid-call`
 
 Checks that the first statement of a function with a `void*` parameter casts it to a specific type.
+
+## `-Wwraparound`
+
+Checks for integer arithmetic that wraps around where it is used as an index:
+compared to an index reduced with `%` or `&`, reduced with `%` by a size that
+doesn't divide the type's range, or used to index an array it can be past the
+end of. Also checks for the difference of two 16-bit values that wraps around
+at 32 bits because integer promotion computes it in `int`.
+
+The checks follow values through locals and fields, take the conditions that
+guard them into account, and know which values the program stores in struct
+fields, returns from functions, and passes to static functions.
+
+**Reason:** in a ring buffer of size `N`, `(uint16_t)(start - 1)` wraps to
+65535 when `start` is 0, not to `N - 1`. Comparing it to `id % N` then never
+matches. Use `(start + N - 1) % N` instead.
