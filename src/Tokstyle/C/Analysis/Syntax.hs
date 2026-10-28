@@ -5,6 +5,7 @@ module Tokstyle.C.Analysis.Syntax
     , statExprs
     , initExprs
     , localDecls
+    , stats
     ) where
 
 import           Language.C.Syntax.AST
@@ -53,6 +54,20 @@ initExprs :: CInit -> [CExpr]
 initExprs = \case
     CInitExpr e _ -> [e]
     CInitList l _ -> concatMap (initExprs . snd) l
+
+-- | The statements of a function body, recursively.
+stats :: CStat -> [CStat]
+stats s = s : case s of
+    CLabel _ t _ _      -> stats t
+    CCase _ t _         -> stats t
+    CCases _ _ t _      -> stats t
+    CDefault t _        -> stats t
+    CCompound _ items _ -> concat [ stats t | CBlockStmt t <- items ]
+    CIf _ t e _         -> stats t ++ maybe [] stats e
+    CSwitch _ t _       -> stats t
+    CWhile _ t _ _      -> stats t
+    CFor _ _ _ t _      -> stats t
+    _                   -> []
 
 -- | The declarations in a function body, in the order they appear.
 localDecls :: CStat -> [CDecl]

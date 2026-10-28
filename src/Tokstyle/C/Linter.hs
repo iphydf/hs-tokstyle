@@ -71,6 +71,7 @@ import qualified Tokstyle.C.Linter.Conversion         as Conversion (descr)
 import qualified Tokstyle.C.Linter.Memcpy             as Memcpy (descr)
 import qualified Tokstyle.C.Linter.Memset             as Memset (descr)
 import qualified Tokstyle.C.Linter.Memzero            as Memzero (descr)
+import qualified Tokstyle.C.Linter.SilentFree         as SilentFree (descr)
 import qualified Tokstyle.C.Linter.SizeArg            as SizeArg (descr)
 import qualified Tokstyle.C.Linter.Sizeof             as Sizeof (descr)
 import qualified Tokstyle.C.Linter.StrictTypedef      as StrictTypedef (descr)
@@ -94,6 +95,7 @@ linters =
     , Memcpy.descr
     , Memset.descr
     , Memzero.descr
+    , SilentFree.descr
     , SizeArg.descr
     , Sizeof.descr
     , StrictTypedef.descr

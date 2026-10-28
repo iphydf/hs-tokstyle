@@ -1,6 +1,6 @@
 # C-based linters (`check-c`)
 
-There are currently 16 linters implemented.
+There are currently 17 linters implemented.
 
 ## `-Wbool-conversion`
 
@@ -68,6 +68,17 @@ function is wiped on every path that returns after writing it.
 **Reason:** a wipe says the local holds a secret, such as a key or a
 password. An early return that skips the wipe, often on an error path,
 leaves that secret on the stack.
+
+## `-Wsilent-free`
+
+Checks that an object callbacks get pointers to, and that has a `void *`
+member for its owner to point back to itself with, is passed to a
+callback before it is freed. A function may free what it allocated itself
+and what its caller handed it.
+
+**Reason:** whoever registered the callback may keep the pointer it got.
+When the object is freed without that code hearing of it, as on an error
+path, the pointer dangles, and the next use of it is a use after free.
 
 ## `-Wsize-arg`
 
