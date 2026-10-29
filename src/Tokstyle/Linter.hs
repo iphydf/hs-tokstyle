@@ -53,12 +53,16 @@ import qualified Tokstyle.Linter.TypedefName      as TypedefName
 import qualified Tokstyle.Linter.UnsafeFunc       as UnsafeFunc
 import qualified Tokstyle.Linter.VarUnusedInScope as VarUnusedInScope
 
+import qualified Tokstyle.Linter.AllocatorSwap    as AllocatorSwap
 import qualified Tokstyle.Linter.Callgraph        as Callgraph
 import qualified Tokstyle.Linter.DanglingField    as DanglingField
 import qualified Tokstyle.Linter.DeclaredOnce     as DeclaredOnce
 import qualified Tokstyle.Linter.DeclsHaveDefns   as DeclsHaveDefns
 import qualified Tokstyle.Linter.DocComments      as DocComments
+import qualified Tokstyle.Linter.Frees            as Frees
+import qualified Tokstyle.Linter.LockDiscipline   as LockDiscipline
 import qualified Tokstyle.Linter.MemoryLifetime   as MemoryLifetime
+import qualified Tokstyle.Linter.ThreadRoles      as ThreadRoles
 import qualified Tokstyle.Linter.TypeCheck        as TypeCheck
 import qualified Tokstyle.Linter.UnboundedGrowth  as UnboundedGrowth
 import qualified Tokstyle.SemFmt.EnumFromInt      as EnumFromInt
@@ -110,16 +114,21 @@ type GlobalLinter = ([TranslationUnit] -> [Diagnostic CimplePos], (Text, Text))
 
 globalLinters :: [GlobalLinter]
 globalLinters =
-    [ Callgraph.descr
+    [ AllocatorSwap.descr
+    , Callgraph.descr
     , DeclaredOnce.descr
     , DanglingField.descr
     , DeclsHaveDefns.descr
     , DocComments.descr
+    , Frees.doubleFree
+    , LockDiscipline.descr
     , MemoryLifetime.descr
     , Nullability.descr
+    , Nullability.nullIntoNonnull
     , NulTerminated.descr
     , OwnershipDecls.descr
     , PartialFailure.descr
+    , ThreadRoles.descr
     , TypeCheck.descr
     , TaggedUnion.descr
     , UnboundedGrowth.descr

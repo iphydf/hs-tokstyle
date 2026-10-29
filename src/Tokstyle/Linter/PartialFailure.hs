@@ -112,8 +112,8 @@ paramOf = \case
     PathDeref p   -> paramOf p
     _             -> Nothing
 
-evalExpr :: Context -> (AccessPath -> Bool) -> C.Node (Lexeme Text) -> Changes -> Changes
-evalExpr ctx outlives = go
+evalExpr :: Context -> Function -> (AccessPath -> Bool) -> C.Node (Lexeme Text) -> Changes -> Changes
+evalExpr ctx fn outlives = go
   where
     go (Fix node) s = case node of
         UnaryExpr op x | op `elem` [UopIncr, UopDecr] ->
@@ -122,7 +122,7 @@ evalExpr ctx outlives = go
         AssignExpr l AopMinus r | Just n <- intLit r -> change l (negate n) (go r s)
         AssignExpr l _ r -> maybe id under (accessPath l) (go r s)
         FunctionCall callee args
-            | gone@(_ : _) <- mapMaybe accessPath (destroyed (ctxDestructors ctx) (Fix node)) ->
+            | gone@(_ : _) <- mapMaybe accessPath (destroyed (ctxDestructors ctx) fn (Fix node)) ->
                 List.foldl' (flip under) (List.foldl' (flip go) s args) gone
             | L _ _ name <- calleeLexeme callee, Just m <- Map.lookup name (ctxGrows ctx) ->
                 List.foldl' (\acc (q, n) -> maybe acc (\p -> changeAt p n (calleeLexeme callee) acc) (argPath args q))
@@ -170,7 +170,7 @@ exits ctx fn =
 
     stepSt :: Node -> St -> St
     stepSt n (s, rs, found) =
-        (List.foldl' (flip (evalExpr ctx outlives)) s (nodeExprs n), results rs n, derive rs found n)
+        (List.foldl' (flip (evalExpr ctx fn outlives)) s (nodeExprs n), results rs n, derive rs found n)
     assigned n = case n of
         Node _ (StmtNode (Fix (VarDeclStmt (Fix (VarDecl _ (L _ _ v) _)) ini))) -> [(v, bare <$> ini)]
         _ -> [ (v, Just (bare r)) | e <- nodeExprs n, Fix (AssignExpr (Fix (VarExpr (L _ _ v))) _ r) <- universe e ]
@@ -325,7 +325,7 @@ cleanupsBefore ds fn before =
     [ (name, v)
     | Fix (ExprStmt call@(Fix (FunctionCall callee _))) <- before
     , L _ _ name <- [calleeLexeme callee]
-    , Fix (VarExpr (L _ _ v')) <- map strip (destroyed ds call)
+    , Fix (VarExpr (L _ _ v')) <- map strip (destroyed ds fn call)
     , let v = Text.unpack v', v `Set.member` locals
     ]
   where
@@ -446,7 +446,7 @@ ownedAtFailures ds statuses fn =
         -- Storing a local transfers its ownership to what it is stored in.
         AssignExpr _ _ r | Fix (VarExpr (L _ _ v)) <- strip r -> Set.delete (Text.unpack v) owned
         FunctionCall{} ->
-            owned `Set.difference` Set.fromList [ Text.unpack v | Fix (VarExpr (L _ _ v)) <- map strip (destroyed ds (Fix node)) ]
+            owned `Set.difference` Set.fromList [ Text.unpack v | Fix (VarExpr (L _ _ v)) <- map strip (destroyed ds fn (Fix node)) ]
         _ -> owned
     -- A local that is null on an edge needs no destroying there.
     edge n e owned = case n of

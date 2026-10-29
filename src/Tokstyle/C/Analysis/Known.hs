@@ -42,6 +42,8 @@ libraryReaches = Map.fromList
     , ("crypto_sign_verify_detached", [upTo 1 2])
     , ("crypto_box_afternm", [upTo 0 2, upTo 1 2])
     , ("crypto_box_open_afternm", [upTo 0 2, upTo 1 2])
+    , ("crypto_box_easy_afternm", [Reach 0 (Just (2, 1)) 16, upTo 1 2])
+    , ("crypto_box_open_easy_afternm", [Reach 0 (Just (2, 1)) (-16), upTo 1 2])
     ]
   where
     upTo p n = Reach p (Just (n, 1)) 0

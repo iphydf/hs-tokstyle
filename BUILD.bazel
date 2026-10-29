@@ -45,6 +45,7 @@ haskell_library(
         "src/Tokstyle/Cimple/Analysis/FunctionPointers.hs",
         "src/Tokstyle/Cimple/Analysis/Functions.hs",
         "src/Tokstyle/Cimple/Analysis/Liveness.hs",
+        "src/Tokstyle/Cimple/Analysis/Threads.hs",
         "src/Tokstyle/Cimple/Analysis/Types.hs",
     ] + glob(["src/Tokstyle/C/Analysis/**/*.hs"]),
     ghcopts = [
