@@ -1,7 +1,15 @@
 # Cimple-based linters (`check-cimple`)
 
-There are currently 38 linters implemented, out of which 13 perform global analyses.
+There are currently 46 linters implemented, out of which 21 perform global analyses.
 In the list below, the global ones are marked specially.
+
+## `-Wallocator-swap` (global)
+
+Checks that the allocator of an object is not replaced by code that got
+the object from the function that set it.
+
+**Reason:** that function may have allocated with the old allocator, and
+what it allocated is then freed with the new one.
 
 ## `-Wassert`
 
@@ -143,6 +151,14 @@ types at the moment, because making that change in toxcore would be a lot of
 work and we perceive less value in that than in local integer constants, since
 pointers, especially aggregate object pointers, already change less often.
 
+## `-Wdangling-field` (global)
+
+Checks that a struct field whose object gets freed is set to something else
+before the struct is used again.
+
+**Reason:** the struct outlives the function, and the next code that reads
+the field uses freed memory.
+
 ## `-Wdeclared-once` (global)
 
 Checks that any function is declared exactly once.
@@ -165,6 +181,13 @@ corresponding declarations.
 
 **Reason:** ideally, documentation should be only in one place, but if it is
 duplicated, it should not be different.
+
+## `-Wdouble-free` (global)
+
+Checks that nothing is freed again where it may already be freed.
+
+**Reason:** the second free corrupts the allocator's bookkeeping, or frees
+memory that was allocated again in the meantime.
 
 ## `-Wenum-defines`
 
@@ -242,6 +265,28 @@ must be static.
 not declared in a .h file we can include. This means we're depending on an
 unexported implementation detail, and there is no compiler that can check
 whether our declaration matches the implementation's definition.
+
+## `-Wleaked-field` (global)
+
+Checks that memory a function stores in a field is freed before the struct
+holding the field is freed with `free` or `mem_delete`.
+
+**Reason:** those free only the struct, so the field's memory is lost, as
+on an error path that frees what it half built.
+
+## `-Wlock-discipline` (global)
+
+Checks that fields tagged `@guarded_by lock` are written only with that
+lock held, and read with it held where the code may run on any thread, and
+that functions tagged `@requires(param, lock)` are called with the lock held.
+
+Code that does not run on any thread runs on the thread that owns the
+struct, which may read what only it writes. Memory a function has just
+allocated, and what a lock it has just made guards, are its own until it
+shares them.
+
+**Reason:** another thread can change or free what an unlocked access reads
+between its steps.
 
 ## `-Wlogger-calls`
 
@@ -345,6 +390,13 @@ if there's none in it. Byte arrays with a length, such as names and
 messages from the network, have no NUL of their own, and memory nothing
 wrote holds whatever was there before.
 
+## `-Wnull-into-nonnull` (global)
+
+Checks that `nullptr` is never stored in a variable or field declared `_Nonnull`.
+
+**Reason:** code that trusts the declaration dereferences the pointer
+without checking it, as when an optional member is declared `_Nonnull`.
+
 ## `-Wnullability` (global)
 
 Warns when a `_Nullable` pointer is cast to a `_Nonnull` pointer or dereferenced without a null check.
@@ -374,6 +426,19 @@ Suggests removing parentheses where they are not needed:
 redundant parentheses, but in the above cases, they don't add clarity and only
 add more syntax and confusion as to why there are extra parentheses there.
 
+## `-Wpartial-failure` (global)
+
+Checks that a function that fails leaves the lengths of the arrays it was
+given as they were.
+
+**Reason:** a caller that sees the failure goes on as if nothing changed.
+A length changed anyway no longer matches the array, and the work that was
+meant to go with the change, such as telling a callback, never happens.
+
+Also checks that a failure destroys what the failures before it destroy, so
+that what the function made is not left behind for a caller who was told
+nothing was made.
+
 ## `-Wstruct-pack` (global)
 
 Checks that `_pack` functions for `struct`s are complete and correct.
@@ -397,6 +462,19 @@ compilers.
 
 Checks that all unions with incompatible types (pointers) in them are tagged,
 and when accessing their members, the tag is checked.
+
+## `-Wthread-roles` (global)
+
+Checks that code that may run on any thread calls back only through
+callback types marked `@thread any`.
+
+A function may run on any thread when its doc comment says `@thread any`,
+or when it is passed or stored as a callback type that says so. What it
+calls runs on that thread too.
+
+**Reason:** a callback the client wrote for the thread it calls the library
+on may not be safe to call on another, as when it uses state of that thread
+or a runtime bound to it.
 
 ## `-Wtype-check` (global)
 

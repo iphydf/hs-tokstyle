@@ -645,3 +645,26 @@ spec = do
                  , "    |              |"
                  , "    |              conflict with declaration here"
                  ]]
+
+    describe "null-into-nonnull" $ do
+        it "warns when nullptr is stored in a field declared _Nonnull" $ do
+            shouldWarn ["null-into-nonnull"]
+                [ ("test.h", [ "struct Holder {", "  Tox *_Nonnull tox;", "};" ])
+                , ("test.c", [ "void holder_init(Holder *_Nonnull h) {", "  h->tox = nullptr;", "}" ])
+                ]
+                [[ "error: `h->tox` is declared `_Nonnull`, and is set to null here [-Wnull-into-nonnull]"
+                 , "   --> test.c:2:12"
+                 , "    |"
+                 , "   2|   h->tox = nullptr;"
+                 , "    |            ^^^^^^^"
+                 ]]
+
+        it "accepts nullptr in a field declared _Nullable, and zero in an element" $ do
+            shouldAccept ["null-into-nonnull"]
+                [ ("test.h", [ "struct Holder {", "  Tox *_Nullable tox;", "};" ])
+                , ("test.c", [ "void holder_init(Holder *_Nonnull h, uint8_t *_Nonnull data) {"
+                             , "  h->tox = nullptr;"
+                             , "  data[0] = 0;"
+                             , "}"
+                             ])
+                ]

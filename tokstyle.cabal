@@ -32,6 +32,9 @@ library
     Tokstyle.C.Analysis.Types
     Tokstyle.C.Analysis.Liveness
     Tokstyle.Cimple.Analysis.CFG
+    Tokstyle.Cimple.Analysis.Functions
+    Tokstyle.Cimple.Analysis.Threads
+    Tokstyle.Cimple.Analysis.Types
     Tokstyle.Cimple.Analysis.Liveness
     Tokstyle.C.Linter.BoolConversion
     Tokstyle.C.Linter.BorrowCheck
@@ -59,6 +62,7 @@ library
     Tokstyle.Common.StructLinter
     Tokstyle.Common.TypeSystem
     Tokstyle.Linter
+    Tokstyle.Linter.AllocatorSwap
     Tokstyle.Linter.Assert
     Tokstyle.Linter.BooleanReturn
     Tokstyle.Linter.Booleans
@@ -69,8 +73,11 @@ library
     Tokstyle.Linter.CompoundInit
     Tokstyle.Linter.Constness
     Tokstyle.Linter.DeclaredOnce
+    Tokstyle.Linter.DanglingField
     Tokstyle.Linter.DeclsHaveDefns
     Tokstyle.Linter.DocComments
+    Tokstyle.Linter.Frees
+    Tokstyle.Linter.LockDiscipline
     Tokstyle.Linter.EnumDefines
     Tokstyle.Linter.EnumNames
     Tokstyle.Linter.FuncPrototypes
@@ -86,9 +93,11 @@ library
     Tokstyle.Linter.Nullability
     Tokstyle.Linter.NulTerminated
     Tokstyle.Linter.OwnershipDecls
+    Tokstyle.Linter.PartialFailure
     Tokstyle.Linter.Parens
     Tokstyle.Linter.SwitchIf
     Tokstyle.Linter.TaggedUnion
+    Tokstyle.Linter.ThreadRoles
     Tokstyle.Linter.TypeCheck
     Tokstyle.Linter.TypedefName
     Tokstyle.Linter.UnsafeFunc
@@ -205,6 +214,7 @@ test-suite testsuite
     Tokstyle.C.Linter.VoidCallSpec
     Tokstyle.C.Linter.WraparoundSpec
     Tokstyle.C.LinterSpec
+    Tokstyle.Linter.AllocatorSwapSpec
     Tokstyle.Linter.AssertSpec
     Tokstyle.Linter.BooleanReturnSpec
     Tokstyle.Linter.BooleansSpec
@@ -215,8 +225,11 @@ test-suite testsuite
     Tokstyle.Linter.CompoundInitSpec
     Tokstyle.Linter.ConstnessSpec
     Tokstyle.Linter.DeclaredOnceSpec
+    Tokstyle.Linter.DanglingFieldSpec
     Tokstyle.Linter.DeclsHaveDefnsSpec
     Tokstyle.Linter.DocCommentsSpec
+    Tokstyle.Linter.FreesSpec
+    Tokstyle.Linter.LockDisciplineSpec
     Tokstyle.Linter.EnumDefinesSpec
     Tokstyle.Linter.EnumNamesSpec
     Tokstyle.Linter.FuncPrototypesSpec
@@ -232,9 +245,11 @@ test-suite testsuite
     Tokstyle.Linter.NullabilitySpec
     Tokstyle.Linter.NulTerminatedSpec
     Tokstyle.Linter.OwnershipDeclsSpec
+    Tokstyle.Linter.PartialFailureSpec
     Tokstyle.Linter.ParensSpec
     Tokstyle.Linter.SwitchIfSpec
     Tokstyle.Linter.TaggedUnionSpec
+    Tokstyle.Linter.ThreadRolesSpec
     Tokstyle.Linter.TypeCheckSpec
     Tokstyle.Linter.TypedefNameSpec
     Tokstyle.Linter.UnsafeFuncSpec

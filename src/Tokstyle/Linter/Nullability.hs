@@ -7,7 +7,7 @@
 {-# LANGUAGE Strict                #-}
 {-# LANGUAGE TupleSections         #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
-module Tokstyle.Linter.Nullability (descr) where
+module Tokstyle.Linter.Nullability (descr, nullIntoNonnull) where
 
 import           Control.Monad                (foldM, forM, forM_, unless, void,
                                                when)
@@ -461,6 +461,10 @@ collectDefs = astActions
                 let fieldEnv = Map.fromList . concatMap getFieldDecls $ members
                 State.modify $ \(s, errs) -> (s { programStructs = Map.insert (C.lexemeText structName) fieldEnv (programStructs s) }, errs)
                 act
+            C.Struct structName members -> do
+                let fieldEnv = Map.fromList . concatMap getFieldDecls $ members
+                State.modify $ \(s, errs) -> (s { programStructs = Map.insert (C.lexemeText structName) fieldEnv (programStructs s) }, errs)
+                act
             C.TypedefFunction proto -> do
                 case functionName proto of
                     Just name -> do
@@ -606,11 +610,49 @@ linter pdefs = astActions
             _ -> act
     }
 
+programDefs :: [(FilePath, [C.Node (Lexeme Text)])] -> (ProgramDefs, [Diagnostic CimplePos])
+programDefs input = State.execState (traverseAst collectDefs input) (ProgramDefs Map.empty Map.empty Map.empty Map.empty, [])
+
 analyse :: [(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos]
 analyse input =
-    let initialPdefs = ProgramDefs Map.empty Map.empty Map.empty Map.empty
-        (pdefs, globalErrs) = State.execState (traverseAst collectDefs input) (initialPdefs, [])
+    let (pdefs, globalErrs) = programDefs input
     in reverse . flip State.execState globalErrs . traverseAst (linter pdefs) $ input
+
+-- | Literal nulls stored in a variable or field declared never to be null.
+nullStores :: ProgramDefs -> AstActions (State [Diagnostic CimplePos]) Text
+nullStores pdefs = astActions
+    { doNode = \file node act -> case unFix node of
+        C.FunctionDefn{} ->
+            let lst = LinterState (Map.union (collectTypeEnv node) (programGlobals pdefs)) (programStructs pdefs) Map.empty file UnspecifiedNullability
+            in traverse_ (check file lst) (subNodes node)
+        _ -> act
+    }
+  where
+    subNodes n@(Fix f) = n : concatMap subNodes (foldr (:) [] f)
+    check file lst (Fix n) = case n of
+        C.AssignExpr lhs AopEq rhs
+            | isNullLiteral rhs, Just p <- exprToPath lhs, isStore p, getDeclaredNullability p lst == NonNullVar ->
+                report file rhs (ppNode lhs)
+        C.VarDeclStmt (Fix (C.VarDecl ty (C.L _ _ name) _)) (Just ini)
+            | isNullLiteral ini, isNonnull ty -> report file ini (pretty name)
+        _ -> return ()
+    -- An element of a pointer is not the pointer.
+    isStore = \case
+        PathVar{}   -> True
+        PathField{} -> True
+        _           -> False
+    isNullLiteral = \case
+        Fix (C.ParenExpr e)                    -> isNullLiteral e
+        Fix (C.LiteralExpr _ (C.L _ _ "nullptr")) -> True
+        Fix (C.LiteralExpr _ (C.L _ _ "NULL")) -> True
+        _                                      -> False
+    report file at what =
+        let (pos, len) = nodePosAndLen file at
+        in warnRich $ Diagnostic pos len ErrorLevel
+            (backticks what <+> "is declared `_Nonnull`, and is set to null here") Nothing [] []
+
+analyseNullStores :: [(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos]
+analyseNullStores input = reverse . flip State.execState [] . traverseAst (nullStores (fst (programDefs input))) $ input
 
 descr :: ([(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
 descr = (analyse, ("nullability", Text.unlines
@@ -618,4 +660,12 @@ descr = (analyse, ("nullability", Text.unlines
     , ""
     , "**Reason:** Casting a nullable pointer to a non-null pointer or dereferencing it without ensuring it's not"
     , "null can lead to null pointer dereferences and crashes."
+    ]))
+
+nullIntoNonnull :: ([(FilePath, [C.Node (Lexeme Text)])] -> [Diagnostic CimplePos], (Text, Text))
+nullIntoNonnull = (analyseNullStores, ("null-into-nonnull", Text.unlines
+    [ "Checks that `nullptr` is never stored in a variable or field declared `_Nonnull`."
+    , ""
+    , "**Reason:** code that trusts the declaration dereferences the pointer"
+    , "without checking it, as when an optional member is declared `_Nonnull`."
     ]))
