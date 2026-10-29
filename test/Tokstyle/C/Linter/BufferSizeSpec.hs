@@ -351,3 +351,43 @@ spec = do
              , "  12|   crypto_hash_sha256(hash, buf, length);"
              , "    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
              ]]
+
+    it "knows encrypting reaches the MAC size past the plain text" $ do
+        shouldWarn' (prelude ++
+            [ "int crypto_box_easy_afternm(uint8_t *c, const uint8_t *m, unsigned long long mlen, const uint8_t *n, const uint8_t *k);"
+            , "void f(const uint8_t *plain, uint16_t length, const uint8_t *n, const uint8_t *k) {"
+            , "  const uint16_t size = length + 16;"
+            , "  uint8_t encrypted[size];"
+            , "  crypto_box_easy_afternm(encrypted, plain, length, n, k);"
+            , "}"
+            ])
+            [[ "error: `size` can wrap around to values from 0 to 15, so `encrypted` can be smaller than the 65551 bytes `crypto_box_easy_afternm` reaches [-Wbuffer-size]"
+             , "   --> test.c:12:3"
+             , "    |"
+             , "  10|   const uint16_t size = length + 16;"
+             , "    |                         ^^^^^^^^^^^"
+             , "    |                         |"
+             , "    |                         wraps around here"
+             , "  12|   crypto_box_easy_afternm(encrypted, plain, length, n, k);"
+             , "    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+             ]]
+
+    it "knows decrypting reaches the MAC size short of the cipher text" $ do
+        shouldWarn' (prelude ++
+            [ "int crypto_box_open_easy_afternm(uint8_t *m, const uint8_t *c, unsigned long long clen, const uint8_t *n, const uint8_t *k);"
+            , "void f(const uint8_t *encrypted, uint16_t length, const uint8_t *n, const uint8_t *k) {"
+            , "  const uint16_t size = length + 1;"
+            , "  uint8_t plain[size];"
+            , "  crypto_box_open_easy_afternm(plain, encrypted, length, n, k);"
+            , "}"
+            ])
+            [[ "error: `size` can wrap around to 0, so `plain` can be smaller than the 65519 bytes `crypto_box_open_easy_afternm` reaches [-Wbuffer-size]"
+             , "   --> test.c:12:3"
+             , "    |"
+             , "  10|   const uint16_t size = length + 1;"
+             , "    |                         ^^^^^^^^^^"
+             , "    |                         |"
+             , "    |                         wraps around here"
+             , "  12|   crypto_box_open_easy_afternm(plain, encrypted, length, n, k);"
+             , "    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+             ]]

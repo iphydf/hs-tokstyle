@@ -35,7 +35,10 @@ library
     Tokstyle.C.Analysis.Liveness
     Tokstyle.Cimple.Analysis.CFG
     Tokstyle.Cimple.Analysis.Destructors
+    Tokstyle.Cimple.Analysis.FunctionPointers
     Tokstyle.Cimple.Analysis.Functions
+    Tokstyle.Cimple.Analysis.Threads
+    Tokstyle.Cimple.Analysis.Types
     Tokstyle.Cimple.Analysis.Liveness
     Tokstyle.C.Linter.BoolConversion
     Tokstyle.C.Linter.BorrowCheck
@@ -51,6 +54,7 @@ library
     Tokstyle.C.Linter.SilentFree
     Tokstyle.C.Linter.SizeArg
     Tokstyle.C.Linter.Sizeof
+    Tokstyle.C.Linter.SizeofTarget
     Tokstyle.C.Linter.StrictTypedef
     Tokstyle.C.Linter.VoidCall
     Tokstyle.C.Linter.Wraparound
@@ -63,6 +67,7 @@ library
     Tokstyle.Common.StructLinter
     Tokstyle.Common.TypeSystem
     Tokstyle.Linter
+    Tokstyle.Linter.AllocatorSwap
     Tokstyle.Linter.Assert
     Tokstyle.Linter.BooleanReturn
     Tokstyle.Linter.Booleans
@@ -78,9 +83,11 @@ library
     Tokstyle.Linter.DocComments
     Tokstyle.Linter.EnumDefines
     Tokstyle.Linter.EnumNames
+    Tokstyle.Linter.Frees
     Tokstyle.Linter.FuncPrototypes
     Tokstyle.Linter.FuncScopes
     Tokstyle.Linter.GlobalFuncs
+    Tokstyle.Linter.LockDiscipline
     Tokstyle.Linter.LoggerCalls
     Tokstyle.Linter.LoggerConst
     Tokstyle.Linter.LoggerNoEscapes
@@ -96,6 +103,7 @@ library
     Tokstyle.Linter.Parens
     Tokstyle.Linter.SwitchIf
     Tokstyle.Linter.TaggedUnion
+    Tokstyle.Linter.ThreadRoles
     Tokstyle.Linter.TypeCheck
     Tokstyle.Linter.TypedefName
     Tokstyle.Linter.UnsafeFunc
@@ -195,6 +203,7 @@ test-suite testsuite
     Tokstyle.Analysis.SymbolicSpec
     Tokstyle.Cimple.Analysis.CFGSpec
     Tokstyle.Cimple.Analysis.DestructorsSpec
+    Tokstyle.Cimple.Analysis.FunctionPointersSpec
     Tokstyle.Cimple.Analysis.LivenessSpec
     Tokstyle.C.Linter.BoolConversionSpec
     Tokstyle.C.Linter.BorrowCheckSpec
@@ -210,10 +219,12 @@ test-suite testsuite
     Tokstyle.C.Linter.SilentFreeSpec
     Tokstyle.C.Linter.SizeArgSpec
     Tokstyle.C.Linter.SizeofSpec
+    Tokstyle.C.Linter.SizeofTargetSpec
     Tokstyle.C.Linter.StrictTypedefSpec
     Tokstyle.C.Linter.VoidCallSpec
     Tokstyle.C.Linter.WraparoundSpec
     Tokstyle.C.LinterSpec
+    Tokstyle.Linter.AllocatorSwapSpec
     Tokstyle.Linter.AssertSpec
     Tokstyle.Linter.BooleanReturnSpec
     Tokstyle.Linter.BooleansSpec
@@ -229,9 +240,11 @@ test-suite testsuite
     Tokstyle.Linter.DocCommentsSpec
     Tokstyle.Linter.EnumDefinesSpec
     Tokstyle.Linter.EnumNamesSpec
+    Tokstyle.Linter.FreesSpec
     Tokstyle.Linter.FuncPrototypesSpec
     Tokstyle.Linter.FuncScopesSpec
     Tokstyle.Linter.GlobalFuncsSpec
+    Tokstyle.Linter.LockDisciplineSpec
     Tokstyle.Linter.LoggerCallsSpec
     Tokstyle.Linter.LoggerConstSpec
     Tokstyle.Linter.LoggerNoEscapesSpec
@@ -247,6 +260,7 @@ test-suite testsuite
     Tokstyle.Linter.ParensSpec
     Tokstyle.Linter.SwitchIfSpec
     Tokstyle.Linter.TaggedUnionSpec
+    Tokstyle.Linter.ThreadRolesSpec
     Tokstyle.Linter.TypeCheckSpec
     Tokstyle.Linter.TypedefNameSpec
     Tokstyle.Linter.UnsafeFuncSpec

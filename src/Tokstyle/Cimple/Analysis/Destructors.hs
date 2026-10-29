@@ -24,34 +24,65 @@ import           Tokstyle.Analysis.Dataflow         (Dataflow (..), solve)
 import           Tokstyle.Cimple.Analysis.CFG       (EdgeType (..), Node (..),
                                                      NodeKind (..),
                                                      fromFunction)
+import           Tokstyle.Cimple.Analysis.FunctionPointers (FieldTargets,
+                                                            Targets (..),
+                                                            callTargets,
+                                                            fieldTargets)
 import           Tokstyle.Cimple.Analysis.Functions
+import           Tokstyle.Cimple.Analysis.Types     (Structs, structs)
 
 
 data Destroys = All | Fields (Set Text)
     deriving (Eq)
 
-type Destructors = Map Text Done
+data Destructors = Destructors
+    { dsSummaries :: Map Text Done
+    , dsTypes     :: Structs
+    , dsTargets   :: FieldTargets
+    }
 
 -- | Get the arguments a call destroys, wholly or partly.
-destroyed :: Destructors -> C.Node (Lexeme Text) -> [C.Node (Lexeme Text)]
-destroyed ds e = map snd (destroyedBy ds e)
+destroyed :: Destructors -> Function -> C.Node (Lexeme Text) -> [C.Node (Lexeme Text)]
+destroyed ds fn e = map snd (destroyedBy ds fn e)
 
-destroyedBy :: Destructors -> C.Node (Lexeme Text) -> [(Destroys, C.Node (Lexeme Text))]
-destroyedBy ds e = case unFix' (strip e) of
-    FunctionCall callee args | L _ _ g <- calleeLexeme callee, Just ps <- Map.lookup g ds ->
-        [ (d, a) | (i, a) <- zip [0 ..] args, Just d <- [Map.lookup i ps] ]
+destroyedBy :: Destructors -> Function -> C.Node (Lexeme Text) -> [(Destroys, C.Node (Lexeme Text))]
+destroyedBy ds fn e = case unFix' (strip e) of
+    FunctionCall callee args ->
+        let ps = calleeDestroys ds fn callee
+        in [ (d, a) | (i, a) <- zip [0 ..] args, Just d <- [Map.lookup i ps] ]
     _ -> []
+
+-- | Get what a callee destroys: for a call through a function pointer, what
+-- all of its targets destroy.
+calleeDestroys :: Destructors -> Function -> C.Node (Lexeme Text) -> Done
+calleeDestroys ds fn callee = case calleeLexeme callee of
+    L _ _ g | not (Text.null g) -> summary g
+    _ -> case pointerTargets ds fn callee of
+        g : gs -> List.foldl' meet (summary g) (map summary gs)
+        []     -> Map.empty
+  where
+    summary g = Map.findWithDefault Map.empty g (dsSummaries ds)
+
+-- | Get the targets of a call through a field, when all of them are known.
+pointerTargets :: Destructors -> Function -> C.Node (Lexeme Text) -> [Text]
+pointerTargets ds fn callee = case callTargets (dsTypes ds) (dsTargets ds) fn callee of
+    Just (Only gs) -> Set.toList gs
+    _              -> []
 
 -- | Infer the destructors of a program: functions that destroy a parameter or
 -- some of its fields on every exit except failure returns.
 destructors :: [(FilePath, [C.Node (Lexeme Text)])] -> Destructors
-destructors tus = bottomUp callees add look (definitions tus) (Map.map (`Map.singleton` All) freers)
+destructors tus = bottomUp calls add look fns base
   where
+    fns = definitions tus
+    base = Destructors (Map.map (`Map.singleton` All) freers) (structs tus) (fieldTargets tus)
+    calls f = callees f ++
+        [ g | Fix (FunctionCall callee _) <- universe (fnDefn f), g <- pointerTargets base f callee ]
     add ds f
         | Map.null ps = ds
-        | otherwise   = Map.insert (fnName f) ps ds
+        | otherwise   = ds { dsSummaries = Map.insert (fnName f) ps (dsSummaries ds) }
       where ps = destroys ds f
-    look ds f = Map.lookup (fnName f) ds
+    look ds f = Map.lookup (fnName f) (dsSummaries ds)
 
 -- | Dataflow state: what every path to a node has destroyed of each
 -- parameter.
@@ -111,7 +142,7 @@ destroys ds fn = case ends of
     expr e done = List.foldl' (flip replace) (List.foldl' (flip destroy) done gone) replaced
       where
         gone = concat
-            [ parts d p | c <- universe e, (d, a) <- destroyedBy ds c, Just p <- [owner a] ]
+            [ parts d p | c <- universe e, (d, a) <- destroyedBy ds fn c, Just p <- [owner a] ]
         replaced =
             [ p | Fix (AssignExpr l _ r) <- universe e
                 , isNothing (constName r), isNothing (intLit r), Just p <- [under l] ]

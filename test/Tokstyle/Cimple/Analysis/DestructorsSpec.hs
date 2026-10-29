@@ -21,7 +21,7 @@ destroyedIn code = do
         [ v
         | fn <- definitions tus, fnName fn == "caller"
         , call@(Fix FunctionCall{}) <- universe (fnDefn fn)
-        , Fix (VarExpr (L _ _ v)) <- destroyed ds call ]
+        , Fix (VarExpr (L _ _ v)) <- destroyed ds fn call ]
 
 
 spec :: Spec
